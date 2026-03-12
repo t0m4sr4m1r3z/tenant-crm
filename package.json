@@ -1,0 +1,15 @@
+{
+  "name": "tenant-crm",
+  "version": "1.0.0",
+  "description": "Sistema de gestión de inquilinos",
+  "main": "index.js",
+  "scripts": {
+    "dev": "netlify dev",
+    "build": "echo 'No build needed'"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.9.0",
+    "dotenv": "^17.3.1",
+    "resend": "^3.0.0"
+  }
+}

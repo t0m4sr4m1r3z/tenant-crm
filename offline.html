@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sin conexión - Tenant CRM</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- PWA Meta Tags -->
+<link rel="manifest" href="/site.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Tenant CRM">
+<meta name="theme-color" content="#2563eb">
+<meta name="mobile-web-app-capable" content="yes">
+
+<!-- iOS Icons -->
+<link rel="apple-touch-icon" href="/icons/icon-192x192.png">
+<link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192x192.png">
+<link rel="apple-touch-icon" sizes="167x167" href="/icons/icon-192x192.png">
+
+<!-- Windows Tiles -->
+<meta name="msapplication-TileColor" content="#2563eb">
+<meta name="msapplication-TileImage" content="/icons/icon-144x144.png">
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center">
+    <div class="text-center p-8 max-w-md">
+        <div class="bg-blue-100 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6">
+            <i class="fas fa-wifi-slash text-blue-600 text-4xl"></i>
+        </div>
+        <h1 class="text-2xl font-bold text-gray-800 mb-2">Sin conexión a internet</h1>
+        <p class="text-gray-600 mb-6">Parece que no tienes conexión. No te preocupes, puedes seguir usando las funciones básicas y los datos se sincronizarán cuando vuelvas a estar online.</p>
+        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6 text-left">
+            <p class="text-sm text-yellow-700">
+                <i class="fas fa-lightbulb mr-2"></i>
+                Los pagos y contratos que crees se guardarán localmente y se sincronizarán automáticamente cuando recuperes la conexión.
+            </p>
+        </div>
+        <button onclick="window.location.reload()" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition">
+            <i class="fas fa-sync-alt mr-2"></i>Reintentar conexión
+        </button>
+    </div>
+    <script src="/js/pwa.js"></script>
+</body>
+</html>
