@@ -1,4 +1,4 @@
-// Settings management
+// settings.js - Gestión de configuración
 document.addEventListener('DOMContentLoaded', () => {
     if (!window.AUTH) {
         console.error('Auth module not loaded');
@@ -11,10 +11,11 @@ document.addEventListener('DOMContentLoaded', () => {
     initSidebar();
     loadSettings();
     initSettingsForm();
+    initIndicesPanel();
+    initNotificationsConfig();
 });
 
 function initSidebar() {
-    // Same sidebar initialization
     const menuBtn = document.getElementById('menuBtn');
     const sidebar = document.getElementById('sidebar');
     const closeBtn = document.getElementById('closeSidebarBtn');
@@ -40,7 +41,6 @@ function initSidebar() {
 }
 
 function loadSettings() {
-    // Load saved settings from localStorage
     const settings = JSON.parse(localStorage.getItem('appSettings')) || {
         emailFrom: 'notificaciones@tenantcrm.com',
         emailSignature: 'Atentamente,\nEquipo de Gestión',
@@ -48,14 +48,18 @@ function loadSettings() {
         defaultIncreaseFrequency: 12
     };
     
-    // Populate form
-    document.getElementById('emailFrom').value = settings.emailFrom;
-    document.getElementById('emailSignature').value = settings.emailSignature;
-    document.getElementById('defaultCommission').value = settings.defaultCommission;
-    document.getElementById('defaultIncreaseFrequency').value = settings.defaultIncreaseFrequency;
+    const emailFrom = document.getElementById('emailFrom');
+    const emailSignature = document.getElementById('emailSignature');
+    const defaultCommission = document.getElementById('defaultCommission');
+    const defaultIncreaseFrequency = document.getElementById('defaultIncreaseFrequency');
     
-    // Update last sync
-    document.getElementById('lastSync').textContent = new Date().toLocaleString();
+    if (emailFrom) emailFrom.value = settings.emailFrom;
+    if (emailSignature) emailSignature.value = settings.emailSignature;
+    if (defaultCommission) defaultCommission.value = settings.defaultCommission;
+    if (defaultIncreaseFrequency) defaultIncreaseFrequency.value = settings.defaultIncreaseFrequency;
+    
+    const lastSync = document.getElementById('lastSync');
+    if (lastSync) lastSync.textContent = new Date().toLocaleString();
 }
 
 function initSettingsForm() {
@@ -72,17 +76,16 @@ function initSettingsForm() {
 
 function saveSettings() {
     const settings = {
-        emailFrom: document.getElementById('emailFrom').value,
-        emailSignature: document.getElementById('emailSignature').value,
-        defaultCommission: parseFloat(document.getElementById('defaultCommission').value) || 5,
-        defaultIncreaseFrequency: parseInt(document.getElementById('defaultIncreaseFrequency').value) || 12
+        emailFrom: document.getElementById('emailFrom')?.value || '',
+        emailSignature: document.getElementById('emailSignature')?.value || '',
+        defaultCommission: parseFloat(document.getElementById('defaultCommission')?.value) || 5,
+        defaultIncreaseFrequency: parseInt(document.getElementById('defaultIncreaseFrequency')?.value) || 12
     };
     
     localStorage.setItem('appSettings', JSON.stringify(settings));
     console.log('Settings saved:', settings);
 }
 
-// Debounce function to prevent too many saves
 function debounce(func, wait) {
     let timeout;
     return function executedFunction(...args) {
@@ -93,4 +96,232 @@ function debounce(func, wait) {
         clearTimeout(timeout);
         timeout = setTimeout(later, wait);
     };
+}
+
+// ============================================
+// CONFIGURACIÓN DE NOTIFICACIONES
+// ============================================
+
+function initNotificationsConfig() {
+    const enableNotificationsBtn = document.getElementById('enableNotificationsBtn');
+    if (!enableNotificationsBtn) return;
+    
+    enableNotificationsBtn.addEventListener('click', async () => {
+        const status = document.getElementById('notificationStatus');
+        
+        if (Notification.permission === 'granted') {
+            if (status) status.innerHTML = '<span class="text-green-600">✅ Notificaciones ya están activadas</span>';
+            return;
+        }
+        
+        const permission = await Notification.requestPermission();
+        
+        if (status) {
+            if (permission === 'granted') {
+                status.innerHTML = '<span class="text-green-600">✅ Notificaciones activadas correctamente</span>';
+                new Notification('🔔 Tenant CRM', {
+                    body: 'Notificaciones activadas. Recibirás alertas importantes.',
+                    icon: '/icons/icon-192x192.png'
+                });
+            } else {
+                status.innerHTML = '<span class="text-red-600">❌ No se pudieron activar las notificaciones</span>';
+            }
+        }
+    });
+}
+
+// ============================================
+// CONFIGURACIÓN DE ÍNDICES ECONÓMICOS
+// ============================================
+
+const INDICES_STORAGE_KEY = 'tenant_crm_indices';
+
+// Cargar índices guardados en localStorage
+function cargarIndicesGuardados() {
+    const saved = localStorage.getItem(INDICES_STORAGE_KEY);
+    if (saved) {
+        try {
+            const data = JSON.parse(saved);
+            const ipcInput = document.getElementById('ipcMensual');
+            const ipcFechaInput = document.getElementById('ipcFecha');
+            const iclInput = document.getElementById('iclMensual');
+            const iclFechaInput = document.getElementById('iclFecha');
+            
+            if (ipcInput && data.ipc) ipcInput.value = data.ipc.mensual;
+            if (ipcFechaInput && data.ipc) ipcFechaInput.value = data.ipc.fecha || '2026-03';
+            if (iclInput && data.icl) iclInput.value = data.icl.mensual;
+            if (iclFechaInput && data.icl) iclFechaInput.value = data.icl.fecha || '2026-03';
+            
+            return data;
+        } catch (e) {
+            console.error('Error parsing saved indices:', e);
+        }
+    }
+    return null;
+}
+
+// Guardar índices manuales
+function guardarIndicesManuales() {
+    const ipcInput = document.getElementById('ipcMensual');
+    const ipcFechaInput = document.getElementById('ipcFecha');
+    const iclInput = document.getElementById('iclMensual');
+    const iclFechaInput = document.getElementById('iclFecha');
+    
+    if (!ipcInput || !iclInput) {
+        console.error('No se encontraron los campos de índices');
+        return;
+    }
+    
+    const ipc = parseFloat(ipcInput.value);
+    const ipcFecha = ipcFechaInput?.value || '2026-03';
+    const icl = parseFloat(iclInput.value);
+    const iclFecha = iclFechaInput?.value || '2026-03';
+    
+    if (isNaN(ipc) || isNaN(icl)) {
+        UI.toast('Por favor ingresa valores válidos', 'error');
+        return;
+    }
+    
+    const indicesData = {
+        ipc: { mensual: ipc, fecha: ipcFecha },
+        icl: { mensual: icl, fecha: iclFecha },
+        actualizado: new Date().toISOString()
+    };
+    
+    localStorage.setItem(INDICES_STORAGE_KEY, JSON.stringify(indicesData));
+    window.indicesManuales = indicesData;
+    
+    const statusEl = document.getElementById('indicesStatus');
+    if (statusEl) {
+        statusEl.innerHTML = '<span class="text-green-600">✅ Índices guardados correctamente</span>';
+        setTimeout(() => {
+            statusEl.innerHTML = '';
+        }, 3000);
+    }
+    
+    UI.toast(`IPC: ${ipc}% / ICL: ${icl}% guardados`, 'success');
+    
+    // Actualizar display
+    cargarIndicesActuales();
+}
+
+// Cargar índices actuales desde la API o localStorage
+async function cargarIndicesActuales() {
+    try {
+        const token = localStorage.getItem('authToken');
+        if (!token) return;
+        
+        const response = await fetch('/.netlify/functions/indices', {
+            headers: { 'Authorization': token }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            
+            const ipcDisplay = document.getElementById('ipcActualDisplay');
+            const iclDisplay = document.getElementById('iclActualDisplay');
+            
+            if (ipcDisplay && data.ipc) {
+                ipcDisplay.textContent = `${data.ipc.monthly}% (${data.ipc.date}) - Fuente: ${data.ipc.source || 'API'}`;
+            }
+            if (iclDisplay && data.icl) {
+                iclDisplay.textContent = `${data.icl.monthly}% (${data.icl.date}) - Fuente: ${data.icl.source || 'API'}`;
+            }
+            return data;
+        }
+    } catch (error) {
+        console.error('Error cargando índices desde API:', error);
+    }
+    
+    // Fallback a localStorage
+    const saved = localStorage.getItem(INDICES_STORAGE_KEY);
+    if (saved) {
+        try {
+            const data = JSON.parse(saved);
+            const ipcDisplay = document.getElementById('ipcActualDisplay');
+            const iclDisplay = document.getElementById('iclActualDisplay');
+            
+            if (ipcDisplay && data.ipc) {
+                ipcDisplay.textContent = `${data.ipc.mensual}% (${data.ipc.fecha}) - Fuente: MANUAL`;
+            }
+            if (iclDisplay && data.icl) {
+                iclDisplay.textContent = `${data.icl.mensual}% (${data.icl.fecha}) - Fuente: MANUAL`;
+            }
+            return data;
+        } catch (e) {
+            console.error('Error parsing saved indices:', e);
+        }
+    }
+    
+    return null;
+}
+
+// Sincronizar con API (cargar valores actuales y sobrescribir formulario)
+async function sincronizarConAPI() {
+    const statusEl = document.getElementById('indicesStatus');
+    if (statusEl) {
+        statusEl.innerHTML = '<span class="text-blue-600">🔄 Sincronizando con API...</span>';
+    }
+    
+    try {
+        const token = localStorage.getItem('authToken');
+        if (!token) throw new Error('No autenticado');
+        
+        const response = await fetch('/.netlify/functions/indices', {
+            headers: { 'Authorization': token }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            
+            const ipcInput = document.getElementById('ipcMensual');
+            const ipcFechaInput = document.getElementById('ipcFecha');
+            const iclInput = document.getElementById('iclMensual');
+            const iclFechaInput = document.getElementById('iclFecha');
+            
+            if (ipcInput && data.ipc) ipcInput.value = data.ipc.monthly;
+            if (ipcFechaInput && data.ipc) ipcFechaInput.value = data.ipc.date;
+            if (iclInput && data.icl) iclInput.value = data.icl.monthly;
+            if (iclFechaInput && data.icl) iclFechaInput.value = data.icl.date;
+            
+            if (statusEl) {
+                statusEl.innerHTML = '<span class="text-green-600">✅ Sincronizado con API</span>';
+                setTimeout(() => {
+                    if (statusEl) statusEl.innerHTML = '';
+                }, 3000);
+            }
+            
+            UI.toast('Índices sincronizados correctamente', 'success');
+            await cargarIndicesActuales();
+        } else {
+            throw new Error('Error en la respuesta');
+        }
+    } catch (error) {
+        console.error('Error sincronizando:', error);
+        if (statusEl) {
+            statusEl.innerHTML = '<span class="text-red-600">❌ Error al sincronizar</span>';
+            setTimeout(() => {
+                if (statusEl) statusEl.innerHTML = '';
+            }, 3000);
+        }
+        UI.toast('Error al sincronizar con API', 'error');
+    }
+}
+
+// Inicializar panel de índices
+function initIndicesPanel() {
+    const guardarBtn = document.getElementById('guardarIndicesBtn');
+    const sincronizarBtn = document.getElementById('sincronizarIndicesBtn');
+    
+    if (guardarBtn) {
+        guardarBtn.addEventListener('click', guardarIndicesManuales);
+    }
+    
+    if (sincronizarBtn) {
+        sincronizarBtn.addEventListener('click', sincronizarConAPI);
+    }
+    
+    // Cargar valores guardados
+    cargarIndicesGuardados();
+    cargarIndicesActuales();
 }

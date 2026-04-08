@@ -46,9 +46,11 @@ exports.handler = async (event, context) => {
                         c.*,
                         t.name as tenant_name,
                         t.email as tenant_email,
-                        t.dni as tenant_dni
+                        t.dni as tenant_dni,
+                        o.name as owner_name
                     FROM contracts c
                     LEFT JOIN tenants t ON c.tenant_id = t.id
+                    LEFT JOIN owners o ON c.owner_id = o.id
                     ORDER BY c.created_at DESC
                 `;
                 console.log(`✅ Encontrados ${contracts.length} contratos`);
@@ -79,15 +81,18 @@ exports.handler = async (event, context) => {
                     newContract.increaseFrequency || 12
                 );
                 
+                // Usar fecha de referencia si existe, sino usar fecha de inicio
+                const referenceDate = newContract.referenceDate || newContract.startDate;
+                
                 const result = await sql`
                     INSERT INTO contracts (
-                        tenant_id, owner, property_address, base_amount,
+                        tenant_id, owner_id, property_address, base_amount,
                         duration, start_date, end_date, increase_type,
                         increase_value, increase_frequency, next_increase_date,
-                        agent_commission, status
+                        agent_commission, status, reference_date
                     ) VALUES (
                         ${newContract.tenantId},
-                        ${newContract.owner || ''},
+                        ${newContract.ownerId || null},
                         ${newContract.propertyAddress || null},
                         ${newContract.baseAmount},
                         ${newContract.duration},
@@ -98,7 +103,8 @@ exports.handler = async (event, context) => {
                         ${newContract.increaseFrequency || 12},
                         ${nextIncreaseDate},
                         ${newContract.agentCommission || 5},
-                        ${newContract.status || 'active'}
+                        ${newContract.status || 'active'},
+                        ${referenceDate}
                     ) RETURNING *
                 `;
                 
@@ -134,11 +140,14 @@ exports.handler = async (event, context) => {
                         updateData.increaseFrequency || 12
                     );
                     
+                    // Usar fecha de referencia si existe, sino usar fecha de inicio
+                    const referenceDate = updateData.referenceDate || updateData.startDate;
+                    
                     query = `
                         UPDATE contracts 
                         SET 
                             tenant_id = $1,
-                            owner = $2,
+                            owner_id = $2,
                             property_address = $3,
                             base_amount = $4,
                             duration = $5,
@@ -150,14 +159,15 @@ exports.handler = async (event, context) => {
                             next_increase_date = $11,
                             agent_commission = $12,
                             status = $13,
+                            reference_date = $14,
                             updated_at = CURRENT_TIMESTAMP
-                        WHERE id = $14
+                        WHERE id = $15
                         RETURNING *
                     `;
                     
                     values = [
                         updateData.tenantId,
-                        updateData.owner || '',
+                        updateData.ownerId || null,
                         updateData.propertyAddress || null,
                         updateData.baseAmount,
                         updateData.duration,
@@ -169,14 +179,18 @@ exports.handler = async (event, context) => {
                         nextIncreaseDate,
                         updateData.agentCommission || 5,
                         updateData.status || 'active',
+                        referenceDate,
                         updateData.id
                     ];
                 } else {
+                    // Usar fecha de referencia si existe, sino mantener la actual
+                    const referenceDate = updateData.referenceDate || null;
+                    
                     query = `
                         UPDATE contracts 
                         SET 
                             tenant_id = $1,
-                            owner = $2,
+                            owner_id = $2,
                             property_address = $3,
                             base_amount = $4,
                             duration = $5,
@@ -185,14 +199,15 @@ exports.handler = async (event, context) => {
                             increase_frequency = $8,
                             agent_commission = $9,
                             status = $10,
+                            reference_date = COALESCE($11, reference_date),
                             updated_at = CURRENT_TIMESTAMP
-                        WHERE id = $11
+                        WHERE id = $12
                         RETURNING *
                     `;
                     
                     values = [
                         updateData.tenantId,
-                        updateData.owner || '',
+                        updateData.ownerId || null,
                         updateData.propertyAddress || null,
                         updateData.baseAmount,
                         updateData.duration,
@@ -201,6 +216,7 @@ exports.handler = async (event, context) => {
                         updateData.increaseFrequency || 12,
                         updateData.agentCommission || 5,
                         updateData.status || 'active',
+                        referenceDate,
                         updateData.id
                     ];
                 }

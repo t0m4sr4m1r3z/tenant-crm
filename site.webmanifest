@@ -4,8 +4,8 @@
     "description": "Sistema de Gestión de Inquilinos - Administra contratos, pagos y aumentos",
     "start_url": "/dashboard.html",
     "display": "standalone",
-    "background_color": "#f9fafb",
-    "theme_color": "#2563eb",
+    "background_color": "#f8fafc",
+    "theme_color": "#4f46e5",
     "orientation": "portrait",
     "icons": [
       {

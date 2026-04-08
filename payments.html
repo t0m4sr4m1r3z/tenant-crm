@@ -5,14 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
     <title>Pagos - Tenant CRM</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="/js/tailwind-config.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/css/style.css">
     <!-- PWA Meta Tags -->
+<link rel="icon" type="image/png" href="/icons/icon-192x192.png">
 <link rel="manifest" href="/site.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Tenant CRM">
-<meta name="theme-color" content="#2563eb">
+<meta name="theme-color" content="#4f46e5">
 <meta name="mobile-web-app-capable" content="yes">
 
 <!-- iOS Icons -->
@@ -22,27 +27,27 @@
 <link rel="apple-touch-icon" sizes="167x167" href="/icons/icon-192x192.png">
 
 <!-- Windows Tiles -->
-<meta name="msapplication-TileColor" content="#2563eb">
+<meta name="msapplication-TileColor" content="#4f46e5">
 <meta name="msapplication-TileImage" content="/icons/icon-144x144.png">
 </head>
-<body class="bg-gray-50 min-h-screen">
+<body class="bg-slate-50 min-h-screen font-sans selection:bg-primary-500 selection:text-white">
     <!-- Navigation Bar -->
-    <nav class="bg-white shadow-lg sticky top-0 z-10">
-        <div class="px-4">
+    <nav class="glass-card sticky top-0 z-30 border-b border-white/20">
+        <div class="px-4 max-w-7xl mx-auto">
             <div class="flex justify-between items-center h-16">
                 <div class="flex items-center">
-                    <button id="menuBtn" class="text-gray-600 hover:text-gray-900 focus:outline-none">
+                    <button id="menuBtn" class="text-slate-600 hover:text-primary-600 focus:outline-none transition-colors">
                         <i class="fas fa-bars text-xl"></i>
                     </button>
-                    <h1 class="text-xl font-bold text-gray-800 ml-3 md:ml-0">Gestión de Pagos</h1>
+                    <h1 class="text-xl font-display font-bold text-slate-800 ml-3 md:ml-0 bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-purple-600 hidden sm:block">Tenant CRM</h1>
                 </div>
                 <div class="flex items-center space-x-3">
-                    <button id="notificationsBtn" class="text-gray-600 hover:text-gray-900 relative p-2 rounded-lg hover:bg-gray-100 transition">
+                    <button id="notificationsBtn" class="text-slate-500 hover:text-primary-600 relative p-2 rounded-xl hover:bg-slate-100/50 transition-all">
                         <i class="fas fa-bell text-xl"></i>
-                        <span id="notificationBadge" class="notification-badge absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 min-w-[20px] px-1 flex items-center justify-center hidden">0</span>
+                        <span id="notificationBadge" class="notification-badge absolute 0 right-0 bg-red-500 text-white text-[10px] font-bold rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center hidden border-2 border-white">0</span>
                     </button>
-                    <button id="logoutBtn" class="bg-red-50 text-red-600 px-3 py-2 rounded-lg text-sm hover:bg-red-100 transition">
-                        <i class="fas fa-sign-out-alt mr-1"></i>
+                    <button id="logoutBtn" class="bg-red-50/50 text-red-600 px-4 py-2 rounded-xl text-sm font-medium hover:bg-red-100/80 transition-all flex items-center">
+                        <i class="fas fa-sign-out-alt mr-2"></i>
                         <span class="hidden sm:inline">Salir</span>
                     </button>
                 </div>
@@ -51,32 +56,45 @@
     </nav>
 
     <!-- Sidebar (copiar el sidebar actualizado de arriba) -->
-    <div id="sidebar" class="fixed inset-0 z-20 hidden">
-        <div class="absolute inset-0 bg-gray-600 bg-opacity-75" id="sidebarOverlay"></div>
-        <div class="absolute left-0 top-0 bottom-0 w-64 bg-white shadow-xl">
-            <div class="p-4 border-b">
-                <div class="flex justify-between items-center">
-                    <h2 class="text-lg font-semibold">Menú</h2>
-                    <button id="closeSidebarBtn" class="text-gray-500 hover:text-gray-700">
-                        <i class="fas fa-times text-xl"></i>
-                    </button>
-                </div>
+    <div id="sidebar" class="fixed inset-0 z-40 hidden">
+        <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" id="sidebarOverlay"></div>
+        <div class="absolute left-0 top-0 bottom-0 w-72 glass-card shadow-2xl transform transition-transform duration-300">
+            <div class="p-6 border-b border-slate-200/50 flex justify-between items-center">
+                <h2 class="text-xl font-display font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-purple-600">Tenant CRM</h2>
+                <button id="closeSidebarBtn" class="text-slate-400 hover:text-slate-600 transition-colors">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
             </div>
             <div class="p-4">
-                <ul class="space-y-2">
-                    <li><a href="/dashboard.html" class="flex items-center p-3 hover:bg-gray-50 rounded-lg text-gray-700 hover:text-blue-600"><i class="fas fa-home w-6"></i><span>Dashboard</span></a></li>
-                    <li><a href="/tenants.html" class="flex items-center p-3 hover:bg-gray-50 rounded-lg text-gray-700 hover:text-blue-600"><i class="fas fa-users w-6"></i><span>Inquilinos</span></a></li>
-                    <li><a href="/contracts.html" class="flex items-center p-3 hover:bg-gray-50 rounded-lg text-gray-700 hover:text-blue-600"><i class="fas fa-file-contract w-6"></i><span>Contratos</span></a></li>
-                    <li><a href="/payments.html" class="flex items-center p-3 bg-blue-50 text-blue-600 rounded-lg"><i class="fas fa-dollar-sign w-6"></i><span>Pagos</span></a></li>
-                    <li><a href="/reports.html" class="flex items-center p-3 hover:bg-gray-50 rounded-lg text-gray-700 hover:text-blue-600"><i class="fas fa-chart-bar w-6"></i><span>Reportes</span></a></li>
-                    <li><a href="/settings.html" class="flex items-center p-3 hover:bg-gray-50 rounded-lg text-gray-700 hover:text-blue-600"><i class="fas fa-cog w-6"></i><span>Configuración</span></a></li>
+                <ul class="space-y-1 font-medium">
+                    <li><a href="/dashboard.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2 group-hover:bg-primary-100"><i class="fas fa-home"></i></div><span>Dashboard</span>
+                    </a></li>
+                    <li><a href="/tenants.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-users"></i></div><span>Inquilinos</span>
+                    </a></li>
+                    <li><a href="/owners.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-user-tie"></i></div><span>Propietarios</span>
+                    </a></li>
+                    <li><a href="/contracts.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-file-contract"></i></div><span>Contratos</span>
+                    </a></li>
+                    <li><a href="/payments.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-dollar-sign"></i></div><span>Pagos</span>
+                    </a></li>
+                    <li><a href="/settings.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-cog"></i></div><span>Configuración</span>
+                    </a></li>
+                    <li><a href="/reports.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-chart-bar"></i></div><span>Reportes</span>
+                    </a></li>
                 </ul>
             </div>
         </div>
     </div>
 
     <!-- Main Content -->
-    <main class="p-4 max-w-7xl mx-auto">
+    <main class="p-4 pb-20 max-w-7xl mx-auto animate-fade-in relative z-0">
         <!-- Header -->
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
             <div>
@@ -299,6 +317,7 @@
     <script src="/js/auth.js"></script>
     <script src="/js/ui.js"></script>
     <script src="/js/notifications.js"></script>
+    <script src="/js/push-notifications.js"></script>
     <script src="/js/pwa.js"></script>
     <script src="/js/payments.js"></script>
 </body>

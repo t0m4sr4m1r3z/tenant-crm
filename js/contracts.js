@@ -77,15 +77,22 @@ const API = {
     
     async getTenants() {
         return this.request('/tenants');
+    },
+    
+    async getOwners() {
+        return this.request('/owners');
     }
 };
 
 // Estado global
 let currentContracts = [];
 let currentTenants = [];
+let currentOwners = [];
 let currentFilter = 'all';
 let searchTimeout = null;
 let currentReceiptData = null;
+let cachedIndices = null;
+let lastIndicesUpdate = null;
 
 // Inicialización
 document.addEventListener('DOMContentLoaded', async () => {
@@ -104,7 +111,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             },
             showLoading: (id, msg) => {
                 const el = document.getElementById(id);
-                if (el) el.innerHTML = `<tr><td colspan="7" class="text-center py-4"><div class="spinner mx-auto mb-2"></div><p class="text-gray-500">${msg}</p></td></tr>`;
+                if (el) el.innerHTML = `§<td colspan="7" class="text-center py-4"><div class="spinner mx-auto mb-2"></div><p class="text-gray-500">${msg}</p>§</td>`;
             },
             hideLoading: (id) => {},
             formatCurrency: (amount) => {
@@ -128,6 +135,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     initModals();
     initSearch();
     await loadTenants();
+    await loadOwners();
     await loadContracts();
     initEventListeners();
 });
@@ -188,7 +196,6 @@ function initEventListeners() {
         });
     });
     
-    // Botones del modal de cálculo
     const viewReceiptBtn = document.getElementById('viewReceiptBtn');
     if (viewReceiptBtn) {
         viewReceiptBtn.addEventListener('click', verReciboProfesional);
@@ -205,7 +212,6 @@ function initEventListeners() {
 }
 
 function initModals() {
-    // Modal de contrato
     const modal = document.getElementById('contractModal');
     const closeBtn = document.getElementById('closeModalBtn');
     const cancelBtn = document.getElementById('cancelModalBtn');
@@ -237,7 +243,6 @@ function initModals() {
         });
     }
     
-    // Modal de cálculo
     const calcModal = document.getElementById('calculationModal');
     const closeCalcBtn = document.getElementById('closeCalculationBtn');
     
@@ -247,7 +252,6 @@ function initModals() {
         });
     }
     
-    // Cerrar con ESC
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             if (modal && !modal.classList.contains('hidden')) {
@@ -262,6 +266,29 @@ function initModals() {
             }
         }
     });
+}
+
+
+async function loadOwners() {
+    try {
+        currentOwners = await API.getOwners();
+        populateOwnerSelect();
+    } catch (error) {
+        console.error('Error cargando propietarios:', error);
+    }
+}
+
+function populateOwnerSelect() {
+    const select = document.getElementById('contractOwnerId');
+    if (!select) return;
+    
+    if (!currentOwners || currentOwners.length === 0) {
+        select.innerHTML = '<option value="">No hay propietarios disponibles</option>';
+        return;
+    }
+    
+    select.innerHTML = '<option value="">Seleccionar propietario...</option>' +
+        currentOwners.map(o => `<option value="${o.id}">${escapeHtml(o.name)}${o.dni ? ` (${escapeHtml(o.dni)})` : ''}</option>`).join('');
 }
 
 async function loadTenants() {
@@ -363,7 +390,7 @@ function renderizarTablaContratos(contracts) {
         return `
             <tr class="hover:bg-gray-50 transition">
                 <td class="px-6 py-4">${escapeHtml(contract.tenant_name || 'N/A')}</td>
-                <td class="px-6 py-4">${escapeHtml(contract.owner || 'N/A')}</td>
+                <td class="px-6 py-4">${escapeHtml(contract.owner_name || 'N/A')}</td>
                 <td class="px-6 py-4">${UI.formatCurrency(contract.base_amount)}</td>
                 <td class="px-6 py-4">${contract.duration} meses</td>
                 <td class="px-6 py-4">${nextIncrease}</td>
@@ -401,7 +428,7 @@ function filterContracts(searchTerm) {
         const term = searchTerm.toLowerCase().trim();
         filtered = filtered.filter(c => 
             (c.tenant_name && c.tenant_name.toLowerCase().includes(term)) ||
-            (c.owner && c.owner.toLowerCase().includes(term))
+            (c.owner_name && c.owner_name.toLowerCase().includes(term))
         );
     }
     
@@ -435,11 +462,13 @@ function abrirModalNuevoContratoInterno() {
     
     const today = new Date().toISOString().split('T')[0];
     const startDateInput = document.getElementById('contractStartDate');
+    const referenceDateInput = document.getElementById('contractReferenceDate');
     const frequencyInput = document.getElementById('contractIncreaseFrequency');
     const commissionInput = document.getElementById('contractAgentCommission');
     const statusInput = document.getElementById('contractStatus');
     
     if (startDateInput) startDateInput.value = today;
+    if (referenceDateInput) referenceDateInput.value = '';
     if (frequencyInput) frequencyInput.value = '12';
     if (commissionInput) commissionInput.value = '5';
     if (statusInput) statusInput.value = 'active';
@@ -465,11 +494,15 @@ function abrirModalEditarContratoInterno(contractId) {
     title.textContent = 'Editar Contrato';
     document.getElementById('contractId').value = contract.id;
     document.getElementById('contractTenantId').value = contract.tenant_id || '';
-    document.getElementById('contractOwner').value = contract.owner || '';
+    document.getElementById('contractOwnerId').value = contract.owner_id || '';
     document.getElementById('contractAddress').value = contract.property_address || '';
     document.getElementById('contractBaseAmount').value = contract.base_amount;
     document.getElementById('contractDuration').value = contract.duration;
     document.getElementById('contractStartDate').value = contract.start_date;
+    const referenceDateInput = document.getElementById('contractReferenceDate');
+    if (referenceDateInput && contract.reference_date) {
+        referenceDateInput.value = contract.reference_date;
+    }
     document.getElementById('contractIncreaseType').value = contract.increase_type || 'fixed';
     document.getElementById('contractIncreaseValue').value = contract.increase_value || '';
     document.getElementById('contractIncreaseFrequency').value = contract.increase_frequency || 12;
@@ -482,11 +515,13 @@ function abrirModalEditarContratoInterno(contractId) {
 async function guardarContrato() {
     const contractData = {
         tenantId: parseInt(document.getElementById('contractTenantId').value),
-        owner: document.getElementById('contractOwner').value.trim(),
+        ownerId: parseInt(document.getElementById('contractOwnerId').value) || null,  // ID del propietario
+        owner: document.getElementById('contractOwnerId').options[document.getElementById('contractOwnerId').selectedIndex]?.text || '', // Nombre del propietario
         propertyAddress: document.getElementById('contractAddress').value.trim(),
         baseAmount: parseFloat(document.getElementById('contractBaseAmount').value),
         duration: parseInt(document.getElementById('contractDuration').value),
         startDate: document.getElementById('contractStartDate').value,
+        referenceDate: document.getElementById('contractReferenceDate')?.value || null,
         increaseType: document.getElementById('contractIncreaseType').value,
         increaseValue: document.getElementById('contractIncreaseValue').value ? parseFloat(document.getElementById('contractIncreaseValue').value) : null,
         increaseFrequency: parseInt(document.getElementById('contractIncreaseFrequency').value),
@@ -497,9 +532,8 @@ async function guardarContrato() {
     const id = document.getElementById('contractId').value;
     if (id) contractData.id = parseInt(id);
     
-    // Validaciones
     if (!contractData.tenantId) return UI.toast('Debes seleccionar un inquilino', 'warning');
-    if (!contractData.owner) return UI.toast('El propietario es obligatorio', 'warning');
+    if (!contractData.ownerId) return UI.toast('El propietario es obligatorio', 'warning');
     if (!contractData.baseAmount || contractData.baseAmount <= 0) return UI.toast('Monto inválido', 'warning');
     if (!contractData.startDate) return UI.toast('Fecha de inicio obligatoria', 'warning');
     
@@ -529,10 +563,89 @@ async function guardarContrato() {
 }
 
 // ============================================
-// FUNCIÓN DE CALCULADORA (ÚNICA)
+// FUNCIONES PARA ÍNDICES EN TIEMPO REAL
 // ============================================
 
-function calcularAumento(contractId) {
+async function cargarIndices() {
+    // Primero verificar si hay valores manuales guardados
+    const savedIndices = localStorage.getItem('tenant_crm_indices');
+    
+    if (savedIndices) {
+        try {
+            const manual = JSON.parse(savedIndices);
+            console.log('📊 Usando valores manuales:', manual);
+            
+            // Usar valores manuales
+            cachedIndices = {
+                ipc: { monthly: manual.ipc.mensual, yearly: 0, date: manual.ipc.fecha },
+                icl: { monthly: manual.icl.mensual, date: manual.icl.fecha },
+                updatedAt: manual.actualizado
+            };
+            return cachedIndices;
+        } catch (e) {
+            console.error('Error parsing saved indices:', e);
+        }
+    }
+    
+    // Si no hay valores manuales, intentar con API
+    try {
+        const token = localStorage.getItem('authToken');
+        const response = await fetch('/.netlify/functions/indices', {
+            headers: { 'Authorization': token }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            cachedIndices = data;
+            lastIndicesUpdate = new Date();
+            console.log('📊 Índices actualizados desde API:', cachedIndices);
+            return cachedIndices;
+        }
+    } catch (error) {
+        console.error('Error cargando índices:', error);
+    }
+    
+    // Valores por defecto
+    return {
+        ipc: { monthly: 2.0, yearly: 15.2, value: 100 },
+        icl: { monthly: 2.1, value: 100 },
+        updatedAt: new Date().toISOString()
+    };
+}
+
+function calcularMesesDesdeUltimoAumento(contract) {
+    let fechaReferencia;
+    
+    if (contract.reference_date) {
+        fechaReferencia = new Date(contract.reference_date);
+    } else if (contract.last_increase_date) {
+        fechaReferencia = new Date(contract.last_increase_date);
+    } else {
+        fechaReferencia = new Date(contract.start_date);
+    }
+    
+    const today = new Date();
+    let meses = (today.getFullYear() - fechaReferencia.getFullYear()) * 12;
+    meses += today.getMonth() - fechaReferencia.getMonth();
+    
+    if (today.getDate() < fechaReferencia.getDate()) {
+        meses--;
+    }
+    
+    return Math.max(meses, 1);
+}
+
+function calcularIPCCompuesto(ipcMensual, meses) {
+    const tasa = ipcMensual / 100;
+    const compuesto = Math.pow(1 + tasa, meses) - 1;
+    return (compuesto * 100).toFixed(2);
+}
+
+// ============================================
+// FUNCIÓN DE CALCULADORA
+// ============================================
+
+async function calcularAumento(contractId) {
     console.log('🧮 calcularAumento para contractId:', contractId);
     
     const contract = currentContracts.find(c => c.id === contractId);
@@ -545,27 +658,44 @@ function calcularAumento(contractId) {
     let newAmount = baseAmount;
     let increasePercentage = 0;
     let increaseDescription = '';
+    let indices = null;
     
-    // Calcular según el tipo de aumento
+    if (contract.increase_type === 'ipc' || contract.increase_type === 'ips') {
+        UI.toast('Obteniendo índices actualizados...', 'info');
+        indices = await cargarIndices();
+    }
+    
     switch(contract.increase_type) {
         case 'fixed':
             increasePercentage = parseFloat(contract.increase_value) || 0;
             newAmount = baseAmount * (1 + increasePercentage / 100);
             increaseDescription = `Aumento fijo del ${increasePercentage}%`;
             break;
-            
         case 'ipc':
-            increasePercentage = 3.5;
-            newAmount = baseAmount * 1.035;
-            increaseDescription = 'Aumento por IPC (Índice de Precios al Consumidor)';
+            if (indices && indices.ipc) {
+                const mesesDesdeUltimo = calcularMesesDesdeUltimoAumento(contract);
+                const ipcMensual = parseFloat(indices.ipc.monthly) || 3.5;
+                const ipcAcumulado = calcularIPCCompuesto(ipcMensual, mesesDesdeUltimo);
+                increasePercentage = parseFloat(ipcAcumulado);
+                newAmount = baseAmount * (1 + increasePercentage / 100);
+                increaseDescription = `Aumento por IPC (${increasePercentage}% acumulado en ${mesesDesdeUltimo} meses)`;
+            } else {
+                increasePercentage = 3.5;
+                newAmount = baseAmount * 1.035;
+                increaseDescription = 'Aumento por IPC (valor estimado)';
+            }
             break;
-            
         case 'ips':
-            increasePercentage = 4.0;
-            newAmount = baseAmount * 1.04;
-            increaseDescription = 'Aumento por IPS (Índice de Salarios)';
+            if (indices && indices.icl) {
+                increasePercentage = parseFloat(indices.icl.monthly) || 4.0;
+                newAmount = baseAmount * (1 + increasePercentage / 100);
+                increaseDescription = `Aumento por ICL (${increasePercentage}% mensual)`;
+            } else {
+                increasePercentage = 4.0;
+                newAmount = baseAmount * 1.04;
+                increaseDescription = 'Aumento por ICL (valor estimado)';
+            }
             break;
-            
         default:
             increasePercentage = 0;
             newAmount = baseAmount;
@@ -575,14 +705,11 @@ function calcularAumento(contractId) {
     const commission = newAmount * (parseFloat(contract.agent_commission) / 100);
     const totalWithCommission = newAmount + commission;
     
-    // Calcular fecha del próximo aumento
     let nextIncreaseDate = 'No programado';
     if (contract.next_increase_date) {
         const date = new Date(contract.next_increase_date);
         const today = new Date();
-        const diffTime = date - today;
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        
+        const diffDays = Math.ceil((date - today) / (1000 * 60 * 60 * 24));
         if (diffDays > 0) {
             nextIncreaseDate = `${date.toLocaleDateString()} (en ${diffDays} días)`;
         } else if (diffDays === 0) {
@@ -592,7 +719,6 @@ function calcularAumento(contractId) {
         }
     }
     
-    // Guardar datos para el recibo profesional
     currentReceiptData = {
         contract,
         calculation: {
@@ -602,11 +728,11 @@ function calcularAumento(contractId) {
             increaseDescription,
             commission,
             totalWithCommission,
-            nextIncreaseDate: contract.next_increase_date ? new Date(contract.next_increase_date).toLocaleDateString() : 'No programado'
+            nextIncreaseDate: contract.next_increase_date ? new Date(contract.next_increase_date).toLocaleDateString() : 'No programado',
+            indicesUsed: indices ? { ipc: indices.ipc, icl: indices.icl, updatedAt: indices.updatedAt } : null
         }
     };
     
-    // Mostrar el modal de cálculo
     const calcModal = document.getElementById('calculationModal');
     const calcResult = document.getElementById('calculationResult');
     
@@ -615,98 +741,63 @@ function calcularAumento(contractId) {
         return;
     }
     
-    // Limpiar resultados anteriores
-    calcResult.innerHTML = '';
+    let indicesHtml = '';
+    if (indices && (contract.increase_type === 'ipc' || contract.increase_type === 'ips')) {
+        indicesHtml = `
+            <div class="mt-3 p-2 bg-gray-100 rounded-lg text-xs text-gray-500">
+                <i class="fas fa-chart-line mr-1"></i>
+                Índices actualizados: 
+                ${indices.ipc ? `IPC: ${indices.ipc.monthly}%` : ''}
+                ${indices.icl ? `| ICL: ${indices.icl.monthly}%` : ''}
+                <span class="text-gray-400 ml-1">(${new Date(indices.updatedAt).toLocaleTimeString()})</span>
+            </div>
+        `;
+    }
     
-    // Crear el contenido del modal
-    const resultDiv = document.createElement('div');
-    resultDiv.className = 'space-y-4';
-    resultDiv.innerHTML = `
-        <!-- Cabecera -->
-        <div class="flex items-center justify-between border-b pb-3">
-            <div>
-                <p class="text-sm text-gray-500">Contrato #${contract.id}</p>
-                <p class="font-semibold text-lg">${escapeHtml(contract.tenant_name || 'N/A')}</p>
+    calcResult.innerHTML = `
+        <div class="space-y-4">
+            <div class="flex items-center justify-between border-b pb-3">
+                <div>
+                    <p class="text-sm text-gray-500">Contrato #${contract.id}</p>
+                    <p class="font-semibold text-lg">${escapeHtml(contract.tenant_name || 'N/A')}</p>
+                </div>
+                <span class="badge badge-info">${(contract.increase_type || 'N/A').toUpperCase()}</span>
             </div>
-            <span class="badge badge-info">${(contract.increase_type || 'N/A').toUpperCase()}</span>
-        </div>
-        
-        <!-- Detalles del cálculo -->
-        <div class="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg">
-            <div>
-                <p class="text-xs text-gray-500">Monto Actual</p>
-                <p class="font-bold text-lg">${UI.formatCurrency(baseAmount)}</p>
+            
+            <div class="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg">
+                <div><p class="text-xs text-gray-500">Monto Actual</p><p class="font-bold text-lg">${UI.formatCurrency(baseAmount)}</p></div>
+                <div><p class="text-xs text-gray-500">Porcentaje</p><p class="font-bold text-lg text-blue-600">+${increasePercentage}%</p></div>
+                <div><p class="text-xs text-gray-500">Nuevo Monto</p><p class="font-bold text-lg text-green-600">${UI.formatCurrency(newAmount)}</p></div>
+                <div><p class="text-xs text-gray-500">Comisión (${parseFloat(contract.agent_commission || 5)}%)</p><p class="font-bold text-lg text-purple-600">${UI.formatCurrency(commission)}</p></div>
             </div>
-            <div>
-                <p class="text-xs text-gray-500">Porcentaje</p>
-                <p class="font-bold text-lg text-blue-600">+${increasePercentage}%</p>
+            
+            <div class="border-t border-b py-3">
+                <div class="flex justify-between items-center">
+                    <span class="font-semibold">Total a pagar (con comisión):</span>
+                    <span class="font-bold text-xl text-blue-600">${UI.formatCurrency(totalWithCommission)}</span>
+                </div>
             </div>
-            <div>
-                <p class="text-xs text-gray-500">Nuevo Monto</p>
-                <p class="font-bold text-lg text-green-600">${UI.formatCurrency(newAmount)}</p>
+            
+            <div class="text-sm space-y-2">
+                <p class="flex items-center gap-2"><i class="fas fa-calendar text-gray-400 w-4"></i><span class="text-gray-600">Próximo aumento:</span><span class="font-medium">${nextIncreaseDate}</span></p>
+                <p class="flex items-center gap-2"><i class="fas fa-info-circle text-gray-400 w-4"></i><span class="text-gray-600">Detalle:</span><span class="font-medium">${increaseDescription}</span></p>
+                ${contract.property_address ? `<p class="flex items-center gap-2"><i class="fas fa-map-marker-alt text-gray-400 w-4"></i><span class="text-gray-600">Propiedad:</span><span class="font-medium">${escapeHtml(contract.property_address)}</span></p>` : ''}
             </div>
-            <div>
-                <p class="text-xs text-gray-500">Comisión (${parseFloat(contract.agent_commission || 5)}%)</p>
-                <p class="font-bold text-lg text-purple-600">${UI.formatCurrency(commission)}</p>
+            
+            ${indicesHtml}
+            
+            <div class="flex gap-3 pt-4 border-t">
+                <button onclick="verReciboProfesional()" class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center justify-center gap-2">
+                    <i class="fas fa-file-invoice"></i><span>Ver Recibo</span>
+                </button>
+                <button onclick="aplicarAumentoGlobal(${contract.id}, ${newAmount})" class="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition flex items-center justify-center gap-2">
+                    <i class="fas fa-check"></i><span>Aplicar Aumento</span>
+                </button>
             </div>
-        </div>
-        
-        <!-- Total a pagar -->
-        <div class="border-t border-b py-3">
-            <div class="flex justify-between items-center">
-                <span class="font-semibold">Total a pagar (con comisión):</span>
-                <span class="font-bold text-xl text-blue-600">${UI.formatCurrency(totalWithCommission)}</span>
-            </div>
-        </div>
-        
-        <!-- Información adicional -->
-        <div class="text-sm space-y-2">
-            <p class="flex items-center gap-2">
-                <i class="fas fa-calendar text-gray-400 w-4"></i>
-                <span class="text-gray-600">Próximo aumento:</span>
-                <span class="font-medium">${nextIncreaseDate}</span>
-            </p>
-            <p class="flex items-center gap-2">
-                <i class="fas fa-info-circle text-gray-400 w-4"></i>
-                <span class="text-gray-600">Detalle:</span>
-                <span class="font-medium">${increaseDescription}</span>
-            </p>
-            ${contract.property_address ? `
-            <p class="flex items-center gap-2">
-                <i class="fas fa-map-marker-alt text-gray-400 w-4"></i>
-                <span class="text-gray-600">Propiedad:</span>
-                <span class="font-medium">${escapeHtml(contract.property_address)}</span>
-            </p>
-            ` : ''}
         </div>
     `;
     
-    calcResult.appendChild(resultDiv);
     calcModal.classList.remove('hidden');
-}
-
-// Función para aplicar el aumento
-function aplicarAumento(contractId, newAmount) {
-    const contract = currentContracts.find(c => c.id === contractId);
-    if (!contract) return;
-    
-    UI.confirm({
-        title: 'Aplicar Aumento',
-        message: `¿Estás seguro de aplicar el aumento a ${contract.tenant_name}? El monto pasará de ${UI.formatCurrency(contract.base_amount)} a ${UI.formatCurrency(newAmount)}.`,
-        type: 'warning',
-        confirmText: 'Aplicar',
-        onConfirm: async () => {
-            try {
-                // Aquí iría la lógica para actualizar el contrato
-                UI.toast('Aumento aplicado correctamente', 'success');
-                document.getElementById('calculationModal').classList.add('hidden');
-                // await loadContracts(); // Recargar para ver el cambio
-            } catch (error) {
-                console.error('Error:', error);
-                UI.toast('Error al aplicar el aumento', 'error');
-            }
-        }
-    });
 }
 
 // ============================================
@@ -729,6 +820,42 @@ function eliminarContrato(id) {
                 UI.toast('Error: ' + error.message, 'error');
             } finally {
                 UI.hideLoading('contractsTableBody');
+            }
+        }
+    });
+}
+
+function aplicarAumento(contractId, newAmount) {
+    const contract = currentContracts.find(c => c.id === contractId);
+    if (!contract) return;
+    
+    UI.confirm({
+        title: 'Aplicar Aumento',
+        message: `¿Estás seguro de aplicar el aumento a ${contract.tenant_name}? El monto pasará de ${UI.formatCurrency(contract.base_amount)} a ${UI.formatCurrency(newAmount)}.`,
+        type: 'warning',
+        confirmText: 'Aplicar',
+        onConfirm: async () => {
+            try {
+                await API.updateContract({
+                    id: contract.id,
+                    tenantId: contract.tenant_id,
+                    owner: contract.owner,
+                    propertyAddress: contract.property_address,
+                    baseAmount: newAmount,
+                    duration: contract.duration,
+                    startDate: contract.start_date,
+                    increaseType: contract.increase_type,
+                    increaseValue: contract.increase_value,
+                    increaseFrequency: contract.increase_frequency,
+                    agentCommission: contract.agent_commission,
+                    status: contract.status
+                });
+                UI.toast('Aumento aplicado correctamente', 'success');
+                document.getElementById('calculationModal').classList.add('hidden');
+                await loadContracts();
+            } catch (error) {
+                console.error('Error:', error);
+                UI.toast('Error al aplicar el aumento', 'error');
             }
         }
     });
@@ -764,31 +891,18 @@ function verReciboProfesional() {
     const contract = currentReceiptData.contract;
     const calculation = currentReceiptData.calculation;
     
-    const fechaEmision = new Date().toLocaleDateString('es-ES', {
-        year: 'numeric', month: 'long', day: 'numeric'
-    });
-    
+    const fechaEmision = new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' });
     const fechaVencimiento = new Date();
     fechaVencimiento.setDate(fechaVencimiento.getDate() + 15);
-    const fechaVencimientoStr = fechaVencimiento.toLocaleDateString('es-ES', {
-        year: 'numeric', month: 'long', day: 'numeric'
-    });
+    const fechaVencimientoStr = fechaVencimiento.toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' });
     
     receiptContent.innerHTML = `
         <div class="bg-white p-8 rounded-lg" id="receiptPrintable">
-            <!-- Encabezado -->
             <div class="flex justify-between items-start border-b pb-6 mb-6">
-                <div>
-                    <h1 class="text-3xl font-bold text-blue-600">TENANT CRM</h1>
-                    <p class="text-gray-500">Sistema de Gestión de Inquilinos</p>
-                </div>
-                <div class="text-right">
-                    <p class="text-sm text-gray-500">Recibo N°: <span class="font-bold">${String(contract.id).padStart(6, '0')}</span></p>
-                    <p class="text-sm text-gray-500">Fecha de emisión: <span class="font-bold">${fechaEmision}</span></p>
-                </div>
+                <div><h1 class="text-3xl font-bold text-blue-600">TENANT CRM</h1><p class="text-gray-500">Sistema de Gestión de Inquilinos</p></div>
+                <div class="text-right"><p class="text-sm text-gray-500">Recibo N°: <span class="font-bold">${String(contract.id).padStart(6, '0')}</span></p><p class="text-sm text-gray-500">Fecha de emisión: <span class="font-bold">${fechaEmision}</span></p></div>
             </div>
             
-            <!-- Datos del contrato -->
             <div class="grid grid-cols-2 gap-6 mb-6">
                 <div class="bg-gray-50 p-4 rounded-lg">
                     <h2 class="font-semibold text-gray-700 mb-3">Datos del Inquilino</h2>
@@ -803,61 +917,34 @@ function verReciboProfesional() {
                     <p><span class="text-gray-500">Contrato N°:</span> ${contract.id}</p>
                 </div>
             </div>
+
+            <div class="bg-gray-50 p-4 rounded-lg mb-6">
+                <h2 class="font-semibold text-gray-700 mb-3">📈 Información del Aumento</h2>
+                <div class="grid grid-cols-2 gap-4 text-sm">
+                    <div><p><span class="text-gray-500">Fecha de referencia:</span></p><p class="font-medium">${contract.reference_date ? UI.formatDate(contract.reference_date) : UI.formatDate(contract.start_date)}</p></div>
+                    <div><p><span class="text-gray-500">Meses acumulados:</span></p><p class="font-medium">${calcularMesesDesdeUltimoAumento(contract)} meses</p></div>
+                </div>
+            </div>
             
-            <!-- Detalle del aumento -->
             <div class="mb-6">
                 <h2 class="font-semibold text-gray-700 mb-3">Detalle del Aumento</h2>
                 <table class="w-full">
-                    <thead class="bg-gray-100">
-                        <tr>
-                            <th class="px-4 py-2 text-left text-sm font-medium text-gray-600">Concepto</th>
-                            <th class="px-4 py-2 text-right text-sm font-medium text-gray-600">Importe</th>
-                        </tr>
-                    </thead>
+                    <thead class="bg-gray-100"><tr><th class="px-4 py-2 text-left text-sm font-medium text-gray-600">Concepto</th><th class="px-4 py-2 text-right text-sm font-medium text-gray-600">Importe</th></tr></thead>
                     <tbody class="divide-y">
-                        <tr>
-                            <td class="px-4 py-3">Monto actual</td>
-                            <td class="px-4 py-3 text-right">${UI.formatCurrency(calculation.baseAmount)}</td>
-                        </tr>
-                        <tr>
-                            <td class="px-4 py-3">Tipo de aumento</td>
-                            <td class="px-4 py-3 text-right capitalize">${calculation.increaseDescription}</td>
-                        </tr>
-                        <tr>
-                            <td class="px-4 py-3">Porcentaje de aumento</td>
-                            <td class="px-4 py-3 text-right text-blue-600 font-medium">+${calculation.increasePercentage}%</td>
-                        </tr>
-                        <tr>
-                            <td class="px-4 py-3">Nuevo monto</td>
-                            <td class="px-4 py-3 text-right text-green-600 font-bold">${UI.formatCurrency(calculation.newAmount)}</td>
-                        </tr>
-                        <tr>
-                            <td class="px-4 py-3">Comisión del agente (${contract.agent_commission}%)</td>
-                            <td class="px-4 py-3 text-right">${UI.formatCurrency(calculation.commission)}</td>
-                        </tr>
+                        <tr><td class="px-4 py-3">Monto actual</td><td class="px-4 py-3 text-right">${UI.formatCurrency(calculation.baseAmount)}</td></tr>
+                        <tr><td class="px-4 py-3">Tipo de aumento</td><td class="px-4 py-3 text-right capitalize">${calculation.increaseDescription}</td></tr>
+                        <tr><td class="px-4 py-3">Porcentaje de aumento</td><td class="px-4 py-3 text-right text-blue-600 font-medium">+${calculation.increasePercentage}%</td></tr>
+                        <tr><td class="px-4 py-3">Nuevo monto</td><td class="px-4 py-3 text-right text-green-600 font-bold">${UI.formatCurrency(calculation.newAmount)}</td></tr>
                     </tbody>
-                    <tfoot class="bg-gray-50">
-                        <tr>
-                            <td class="px-4 py-3 font-bold">TOTAL A PAGAR</td>
-                            <td class="px-4 py-3 text-right font-bold text-xl text-blue-600">${UI.formatCurrency(calculation.totalWithCommission)}</td>
-                        </tr>
-                    </tfoot>
+                    <tfoot class="bg-gray-50"><tr><td class="px-4 py-3 font-bold">TOTAL A PAGAR</td><td class="px-4 py-3 text-right font-bold text-xl text-blue-600">${UI.formatCurrency(calculation.newAmount)}</td></tr></tfoot>
                 </table>
             </div>
             
-            <!-- Fechas y condiciones -->
             <div class="grid grid-cols-2 gap-6 mb-6">
-                <div>
-                    <p class="text-sm text-gray-500">Fecha de vencimiento:</p>
-                    <p class="font-bold text-lg text-red-600">${fechaVencimientoStr}</p>
-                </div>
-                <div>
-                    <p class="text-sm text-gray-500">Próximo aumento programado:</p>
-                    <p class="font-bold">${calculation.nextIncreaseDate}</p>
-                </div>
+                <div><p class="text-sm text-gray-500">Fecha de vencimiento:</p><p class="font-bold text-lg text-red-600">${fechaVencimientoStr}</p></div>
+                <div><p class="text-sm text-gray-500">Próximo aumento programado:</p><p class="font-bold">${calculation.nextIncreaseDate}</p></div>
             </div>
             
-            <!-- Notas y condiciones -->
             <div class="border-t pt-6 text-sm text-gray-500">
                 <p class="mb-2"><strong>Nota:</strong> Este recibo es un comprobante válido de la actualización de tu contrato de alquiler.</p>
                 <p>El pago debe realizarse dentro de los 15 días hábiles posteriores a la fecha de emisión.</p>
@@ -874,92 +961,52 @@ function cerrarRecibo() {
 }
 
 function imprimirRecibo() {
-    if (!currentReceiptData) {
-        UI.toast('No hay datos de recibo para imprimir', 'error');
-        return;
-    }
-    
+    if (!currentReceiptData) return;
     const printContent = document.getElementById('receiptPrintable').innerHTML;
     const printWindow = window.open('', '_blank');
-    
-    printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Recibo de Alquiler</title>
-            <script src="https://cdn.tailwindcss.com"></script>
-            <style>
-                @media print {
-                    body { padding: 20px; }
-                    .no-print { display: none; }
-                }
-            </style>
-        </head>
-        <body>
-            ${printContent}
-            <div class="no-print text-center mt-8">
-                <button onclick="window.print()" class="px-4 py-2 bg-blue-600 text-white rounded-lg">
-                    Imprimir
-                </button>
-            </div>
-        </body>
-        </html>
-    `);
-    
+    printWindow.document.write(`<!DOCTYPE html><html><head><title>Recibo de Alquiler</title><script src="https://cdn.tailwindcss.com"><\/script><style>@media print{body{padding:20px}.no-print{display:none}}</style></head><body>${printContent}<div class="no-print text-center mt-8"><button onclick="window.print()" class="px-4 py-2 bg-blue-600 text-white rounded-lg">Imprimir</button></div></body></html>`);
     printWindow.document.close();
 }
 
 function descargarPDF() {
-    if (!currentReceiptData) {
-        UI.toast('No hay datos de recibo para descargar', 'error');
-        return;
-    }
-    
+    if (!currentReceiptData) return;
     try {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
         const contract = currentReceiptData.contract;
         const calculation = currentReceiptData.calculation;
-        
         const fechaEmision = new Date().toLocaleDateString('es-ES');
         const fechaVencimiento = new Date();
         fechaVencimiento.setDate(fechaVencimiento.getDate() + 15);
         
-        // Título
         doc.setFontSize(20);
         doc.setTextColor(37, 99, 235);
         doc.text('TENANT CRM', 14, 22);
-        
         doc.setFontSize(12);
         doc.setTextColor(0, 0, 0);
         doc.text(`Recibo de Alquiler - ${fechaEmision}`, 14, 32);
         doc.text(`Recibo N°: ${String(contract.id).padStart(6, '0')}`, 14, 38);
         
-        // Datos del inquilino
         doc.setFontSize(10);
         doc.text('DATOS DEL INQUILINO:', 14, 48);
         doc.text(`Nombre: ${contract.tenant_name || 'N/A'}`, 14, 54);
         doc.text(`Email: ${contract.tenant_email || 'N/A'}`, 14, 60);
         doc.text(`Documento: ${contract.tenant_dni || 'N/A'}`, 14, 66);
         
-        // Datos del inmueble
         doc.text('DATOS DEL INMUEBLE:', 14, 76);
         doc.text(`Propietario: ${contract.owner || 'N/A'}`, 14, 82);
         doc.text(`Dirección: ${contract.property_address || 'N/A'}`, 14, 88);
         
-        // Tabla de conceptos
-        const tableColumn = ["Concepto", "Importe"];
         const tableRows = [
             ["Monto actual", `$${calculation.baseAmount.toLocaleString()}`],
             ["Tipo de aumento", calculation.increaseDescription],
             ["Porcentaje", `+${calculation.increasePercentage}%`],
             ["Nuevo monto", `$${calculation.newAmount.toLocaleString()}`],
-            [`Comisión (${contract.agent_commission}%)`, `$${calculation.commission.toLocaleString()}`],
-            ["TOTAL A PAGAR", `$${calculation.totalWithCommission.toLocaleString()}`]
+            ["TOTAL A PAGAR", `$${calculation.newAmount.toLocaleString()}`]
         ];
         
         doc.autoTable({
-            head: [tableColumn],
+            head: [["Concepto", "Importe"]],
             body: tableRows,
             startY: 100,
             theme: 'striped',
@@ -967,15 +1014,12 @@ function descargarPDF() {
             headStyles: { fillColor: [37, 99, 235] }
         });
         
-        // Fechas
         const finalY = doc.lastAutoTable.finalY + 10;
-        
         doc.text(`Fecha de vencimiento: ${fechaVencimiento.toLocaleDateString('es-ES')}`, 14, finalY);
         doc.text(`Próximo aumento: ${calculation.nextIncreaseDate}`, 14, finalY + 6);
         
         doc.save(`recibo_${contract.id}_${new Date().toISOString().split('T')[0]}.pdf`);
         UI.toast('PDF descargado correctamente', 'success');
-        
     } catch (error) {
         console.error('Error generando PDF:', error);
         UI.toast('Error al generar el PDF', 'error');
@@ -984,22 +1028,17 @@ function descargarPDF() {
 
 function enviarReciboEmail() {
     if (!currentReceiptData) return;
-    
     UI.confirm({
         title: 'Enviar Recibo',
         message: `¿Enviar recibo a ${currentReceiptData.contract.tenant_email || 'el inquilino'}?`,
         type: 'info',
         confirmText: 'Enviar',
         onConfirm: async () => {
-            try {
-                UI.toast('Enviando recibo por email...', 'info');
-                setTimeout(() => {
-                    UI.toast('Recibo enviado correctamente', 'success');
-                    cerrarRecibo();
-                }, 1500);
-            } catch (error) {
-                UI.toast('Error al enviar el recibo', 'error');
-            }
+            UI.toast('Enviando recibo por email...', 'info');
+            setTimeout(() => {
+                UI.toast('Recibo enviado correctamente', 'success');
+                cerrarRecibo();
+            }, 1500);
         }
     });
 }
@@ -1009,22 +1048,18 @@ function enviarReciboEmail() {
 // ============================================
 
 window.editarContratoGlobal = function(id) {
-    console.log('👆 editarContratoGlobal llamado con id:', id);
     abrirModalEditarContratoInterno(id);
 };
 
 window.eliminarContratoGlobal = function(id) {
-    console.log('👆 eliminarContratoGlobal llamado con id:', id);
     eliminarContrato(id);
 };
 
 window.calcularAumentoGlobal = function(id) {
-    console.log('👆 calcularAumentoGlobal llamado con id:', id);
     calcularAumento(id);
 };
 
 window.abrirModalNuevoContratoGlobal = function() {
-    console.log('👆 abrirModalNuevoContratoGlobal llamado');
     abrirModalNuevoContratoInterno();
 };
 

@@ -5,14 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
     <title>Configuración - Tenant CRM</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="/js/tailwind-config.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/css/style.css">
     <!-- PWA Meta Tags -->
+<link rel="icon" type="image/png" href="/icons/icon-192x192.png">
 <link rel="manifest" href="/site.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Tenant CRM">
-<meta name="theme-color" content="#2563eb">
+<meta name="theme-color" content="#4f46e5">
 <meta name="mobile-web-app-capable" content="yes">
 
 <!-- iOS Icons -->
@@ -22,63 +27,71 @@
 <link rel="apple-touch-icon" sizes="167x167" href="/icons/icon-192x192.png">
 
 <!-- Windows Tiles -->
-<meta name="msapplication-TileColor" content="#2563eb">
+<meta name="msapplication-TileColor" content="#4f46e5">
 <meta name="msapplication-TileImage" content="/icons/icon-144x144.png">
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <nav class="bg-white shadow-lg sticky top-0 z-10">
-        <div class="px-4">
+<body class="bg-slate-50 min-h-screen font-sans selection:bg-primary-500 selection:text-white">
+    <nav class="glass-card sticky top-0 z-30 border-b border-white/20">
+        <div class="px-4 max-w-7xl mx-auto">
             <div class="flex justify-between items-center h-16">
                 <div class="flex items-center">
-                    <button id="menuBtn" class="text-gray-600 hover:text-gray-900 focus:outline-none">
+                    <button id="menuBtn" class="text-slate-600 hover:text-primary-600 focus:outline-none transition-colors">
                         <i class="fas fa-bars text-xl"></i>
                     </button>
-                    <h1 class="text-xl font-bold text-gray-800 ml-3 md:ml-0">Configuración</h1>
+                    <h1 class="text-xl font-display font-bold text-slate-800 ml-3 md:ml-0 bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-purple-600 hidden sm:block">Tenant CRM</h1>
                 </div>
-                <button id="notificationsBtn" class="text-gray-600 hover:text-gray-900 relative p-2 rounded-lg hover:bg-gray-100 transition">
-                    <i class="fas fa-bell text-xl"></i>
-                    <span id="notificationBadge" class="notification-badge absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 min-w-[20px] px-1 flex items-center justify-center hidden">0</span>
-                </button>
-                <button id="logoutBtn" class="bg-red-50 text-red-600 px-3 py-2 rounded-lg text-sm hover:bg-red-100">
-                    <i class="fas fa-sign-out-alt mr-1"></i>
-                    <span class="hidden sm:inline">Salir</span>
-                </button>
+                <div class="flex items-center space-x-3">
+                    <button id="notificationsBtn" class="text-slate-500 hover:text-primary-600 relative p-2 rounded-xl hover:bg-slate-100/50 transition-all">
+                        <i class="fas fa-bell text-xl"></i>
+                        <span id="notificationBadge" class="notification-badge absolute 0 right-0 bg-red-500 text-white text-[10px] font-bold rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center hidden border-2 border-white">0</span>
+                    </button>
+                    <button id="logoutBtn" class="bg-red-50/50 text-red-600 px-4 py-2 rounded-xl text-sm font-medium hover:bg-red-100/80 transition-all flex items-center">
+                        <i class="fas fa-sign-out-alt mr-2"></i>
+                        <span class="hidden sm:inline">Salir</span>
+                    </button>
+                </div>
             </div>
         </div>
     </nav>
 
-    <div id="sidebar" class="fixed inset-0 z-20 hidden">
-        <!-- Same sidebar structure -->
-        <div class="absolute inset-0 bg-gray-600 bg-opacity-75" id="sidebarOverlay"></div>
-        <div class="absolute left-0 top-0 bottom-0 w-64 bg-white shadow-xl">
-            <div class="p-4 border-b">
-                <div class="flex justify-between items-center">
-                    <h2 class="text-lg font-semibold">Menú</h2>
-                    <button id="closeSidebarBtn" class="text-gray-500 hover:text-gray-700">
-                        <i class="fas fa-times text-xl"></i>
-                    </button>
-                </div>
+    <div id="sidebar" class="fixed inset-0 z-40 hidden">
+        <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" id="sidebarOverlay"></div>
+        <div class="absolute left-0 top-0 bottom-0 w-72 glass-card shadow-2xl transform transition-transform duration-300">
+            <div class="p-6 border-b border-slate-200/50 flex justify-between items-center">
+                <h2 class="text-xl font-display font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-purple-600">Tenant CRM</h2>
+                <button id="closeSidebarBtn" class="text-slate-400 hover:text-slate-600 transition-colors">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
             </div>
             <div class="p-4">
-                <ul class="space-y-2">
-                    <li><a href="/dashboard.html" class="block p-3 hover:bg-gray-50 rounded-lg"><i class="fas fa-home mr-3"></i>Dashboard</a></li>
-                    <li><a href="/tenants.html" class="block p-3 hover:bg-gray-50 rounded-lg"><i class="fas fa-users mr-3"></i>Inquilinos</a></li>
-                    <li><a href="/contracts.html" class="block p-3 hover:bg-gray-50 rounded-lg"><i class="fas fa-file-contract mr-3"></i>Contratos</a></li>
-                    <li>
-                        <a href="/payments.html" class="flex items-center p-3 hover:bg-gray-50 rounded-lg text-gray-700 hover:text-blue-600 transition">
-                            <i class="fas fa-dollar-sign w-6"></i>
-                            <span>Pagos</span>
-                        </a>
-                    </li>
-                    <li><a href="/settings.html" class="block p-3 bg-blue-50 text-blue-600 rounded-lg"><i class="fas fa-cog mr-3"></i>Configuración</a></li>
-                    <li><a href="/reports.html" class="flex items-center p-3 hover:bg-gray-50 rounded-lg text-gray-700 hover:text-blue-600">
-                        <i class="fas fa-chart-bar w-6"></i><span>Reportes</span>
+                <ul class="space-y-1 font-medium">
+                    <li><a href="/dashboard.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2 group-hover:bg-primary-100"><i class="fas fa-home"></i></div><span>Dashboard</span>
+                    </a></li>
+                    <li><a href="/tenants.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-users"></i></div><span>Inquilinos</span>
+                    </a></li>
+                    <li><a href="/owners.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-user-tie"></i></div><span>Propietarios</span>
+                    </a></li>
+                    <li><a href="/contracts.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-file-contract"></i></div><span>Contratos</span>
+                    </a></li>
+                    <li><a href="/payments.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-dollar-sign"></i></div><span>Pagos</span>
+                    </a></li>
+                    <li><a href="/settings.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-cog"></i></div><span>Configuración</span>
+                    </a></li>
+                    <li><a href="/reports.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-chart-bar"></i></div><span>Reportes</span>
                     </a></li>
                 </ul>
             </div>
         </div>
     </div>
 
+    <!-- Main Content -->
     <main class="p-4 max-w-4xl mx-auto">
         <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
             <h2 class="text-lg font-semibold mb-6">Configuración del Sistema</h2>
@@ -120,6 +133,91 @@ Equipo de Gestión</textarea>
                         </div>
                     </div>
                 </div>
+                <!-- Notifications Configuration -->
+<div class="border-b pb-6">
+    <h3 class="text-md font-medium mb-4 flex items-center">
+        <i class="fas fa-bell mr-2 text-blue-600"></i>
+        Notificaciones Push
+    </h3>
+    <div class="space-y-4">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="font-medium">Notificaciones en tiempo real</p>
+                <p class="text-sm text-gray-500">Recibe alertas de pagos vencidos, contratos por vencer y más</p>
+            </div>
+            <button id="enableNotificationsBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+                <i class="fas fa-bell mr-2"></i>Activar notificaciones
+            </button>
+        </div>
+        <div id="notificationStatus" class="text-sm"></div>
+    </div>
+</div>
+
+<!-- Sección de Índices Económicos -->
+<div class="border-b pb-6">
+    <h3 class="text-md font-medium mb-4 flex items-center">
+        <i class="fas fa-chart-line mr-2 text-blue-600"></i>
+        Índices Económicos (IPC / ICL)
+    </h3>
+    <div class="space-y-4">
+        <div class="bg-yellow-50 p-4 rounded-lg mb-4">
+            <p class="text-sm text-yellow-800">
+                <i class="fas fa-info-circle mr-2"></i>
+                Los valores actuales son datos REALES del INDEC. Actualiza manualmente cada mes.
+            </p>
+        </div>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="border rounded-lg p-4">
+                <h4 class="font-semibold text-gray-700 mb-3">IPC (Índice de Precios)</h4>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Valor mensual (%)</label>
+                        <input type="number" id="ipcMensual" step="0.1" class="w-full px-3 py-2 border rounded-lg" value="2.0">
+                        <p class="text-xs text-gray-500 mt-1">Ejemplo: 2.0 = 2% de aumento mensual</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Fecha de vigencia</label>
+                        <input type="month" id="ipcFecha" class="w-full px-3 py-2 border rounded-lg" value="2026-03">
+                    </div>
+                </div>
+            </div>
+            
+            <div class="border rounded-lg p-4">
+                <h4 class="font-semibold text-gray-700 mb-3">ICL (Índice de Contrato de Locación)</h4>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Valor mensual (%)</label>
+                        <input type="number" id="iclMensual" step="0.1" class="w-full px-3 py-2 border rounded-lg" value="2.1">
+                        <p class="text-xs text-gray-500 mt-1">Ejemplo: 2.1 = 2.1% de aumento mensual</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Fecha de vigencia</label>
+                        <input type="month" id="iclFecha" class="w-full px-3 py-2 border rounded-lg" value="2026-03">
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="flex gap-3">
+            <button id="guardarIndicesBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+                <i class="fas fa-save mr-2"></i>Guardar Índices
+            </button>
+            <button id="sincronizarIndicesBtn" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
+                <i class="fas fa-sync-alt mr-2"></i>Sincronizar con API
+            </button>
+            <span id="indicesStatus" class="text-sm text-gray-500 self-center"></span>
+        </div>
+        
+        <div class="mt-4 p-3 bg-gray-50 rounded-lg">
+            <p class="text-sm text-gray-600">
+                <i class="fas fa-chart-line mr-1"></i>
+                IPC actual: <span id="ipcActualDisplay" class="font-bold">-</span> | 
+                ICL actual: <span id="iclActualDisplay" class="font-bold">-</span>
+            </p>
+        </div>
+    </div>
+</div>
 
                 <!-- Database Status -->
                 <div>
@@ -146,6 +244,7 @@ Equipo de Gestión</textarea>
     <script src="/js/auth.js"></script>
     <script src="/js/ui.js"></script>
     <script src="/js/notifications.js"></script>
+    <script src="/js/push-notifications.js"></script>
     <script src="/js/pwa.js"></script>
     <script src="/js/settings.js"></script>
 </body>

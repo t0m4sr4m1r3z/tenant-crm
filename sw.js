@@ -1,7 +1,8 @@
-// sw.js - Service Worker para Tenant CRM PWA
-const CACHE_NAME = 'tenant-crm-v1';
+// sw.js - Service Worker para Tenant CRM (VERSIÓN DEFINITIVA)
+const CACHE_NAME = 'tenant-crm-v4';
+
+// Solo cachear recursos locales específicos
 const urlsToCache = [
-  '/',
   '/dashboard.html',
   '/tenants.html',
   '/contracts.html',
@@ -9,69 +10,84 @@ const urlsToCache = [
   '/reports.html',
   '/settings.html',
   '/login.html',
+  '/offline.html',
   '/css/style.css',
   '/js/auth.js',
   '/js/ui.js',
   '/js/notifications.js',
-  '/js/tenants.js',
-  '/js/contracts.js',
-  '/js/payments.js',
-  '/js/reports.js',
-  '/js/dashboard.js',
-  '/js/settings.js',
-  'https://cdn.tailwindcss.com',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
-  'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js'
+  '/js/push-notifications.js'
 ];
 
-// Instalación del Service Worker
+// Instalación
 self.addEventListener('install', event => {
+  console.log('✅ Service Worker instalado');
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('📦 Cache abierto');
-        return cache.addAll(urlsToCache);
+        console.log('📦 Cacheando recursos...');
+        // Cachear solo si la URL es válida
+        return Promise.all(
+          urlsToCache.map(url => {
+            return fetch(url)
+              .then(response => {
+                if (response.ok) {
+                  return cache.put(url, response);
+                }
+              })
+              .catch(() => console.log('⚠️ No se pudo cachear:', url));
+          })
+        );
       })
   );
+  self.skipWaiting();
 });
 
-// Activación y limpieza de caches viejos
+// Activación
 self.addEventListener('activate', event => {
+  console.log('✅ Service Worker activado');
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cacheName => {
           if (cacheName !== CACHE_NAME) {
-            console.log('🗑️ Eliminando cache viejo:', cacheName);
+            console.log('🗑️ Eliminando cache antiguo:', cacheName);
             return caches.delete(cacheName);
           }
         })
       );
     })
   );
+  self.clients.claim();
 });
 
-// Estrategia de caché: Network First, fallback a cache
+// Fetch - Ignorar extensiones y recursos externos
 self.addEventListener('fetch', event => {
-  // No cachear peticiones a la API
-  if (event.request.url.includes('/.netlify/functions/')) {
-    event.respondWith(
-      fetch(event.request)
-        .catch(() => {
-          return caches.match('/offline.html');
-        })
-    );
+  const url = event.request.url;
+  
+  // Ignorar extensiones de Chrome
+  if (url.startsWith('chrome-extension://')) {
     return;
   }
-
+  
+  // No cachear peticiones a la API
+  if (url.includes('/.netlify/functions/')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+  
+  // No cachear recursos externos (CDNs)
+  if (url.includes('cdn.tailwindcss.com') || 
+      url.includes('cdnjs.cloudflare.com') ||
+      url.includes('fonts.googleapis.com') ||
+      url.includes('fonts.gstatic.com')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+  
   event.respondWith(
     fetch(event.request)
       .then(response => {
-        // Si la respuesta es válida, clonarla y guardarla en cache
-        if (response && response.status === 200) {
+        if (response && response.status === 200 && response.type === 'basic') {
           const responseClone = response.clone();
           caches.open(CACHE_NAME).then(cache => {
             cache.put(event.request, responseClone);
@@ -80,66 +96,65 @@ self.addEventListener('fetch', event => {
         return response;
       })
       .catch(() => {
-        // Si falla la red, buscar en cache
-        return caches.match(event.request).then(cachedResponse => {
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-          // Si no está en cache, devolver offline.html
-          return caches.match('/offline.html');
-        });
+        return caches.match(event.request)
+          .then(cachedResponse => {
+            if (cachedResponse) {
+              return cachedResponse;
+            }
+            if (event.request.mode === 'navigate') {
+              return caches.match('/offline.html');
+            }
+          });
       })
   );
 });
 
-// Sincronización en segundo plano (para cuando la app esté offline)
-self.addEventListener('sync', event => {
-  if (event.tag === 'sync-payments') {
-    event.waitUntil(syncPayments());
-  }
+// NOTIFICACIONES PUSH
+self.addEventListener('push', event => {
+  console.log('📨 Evento push recibido');
+  
+  let data = {};
+  try {
+    if (event.data) {
+      data = event.data.json();
+    }
+  } catch (e) {}
+  
+  const options = {
+    body: data.body || 'Tienes una nueva notificación',
+    icon: data.icon || '/icons/icon-192x192.png',
+    badge: '/icons/icon-72x72.png',
+    vibrate: [200, 100, 200],
+    tag: data.tag || 'default',
+    requireInteraction: true,
+    data: {
+      url: data.url || '/dashboard.html'
+    }
+  };
+  
+  event.waitUntil(
+    self.registration.showNotification(data.title || '🔔 Tenant CRM', options)
+  );
 });
 
-async function syncPayments() {
-  try {
-    const db = await openDB();
-    const pendingPayments = await db.getAll('pendingPayments');
-    
-    for (const payment of pendingPayments) {
-      try {
-        const response = await fetch('/.netlify/functions/payments', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payment)
-        });
-        
-        if (response.ok) {
-          await db.delete('pendingPayments', payment.id);
+// CLIC EN NOTIFICACIÓN
+self.addEventListener('notificationclick', event => {
+  console.log('👆 Clic en notificación');
+  event.notification.close();
+  
+  const urlToOpen = event.notification.data?.url || '/dashboard.html';
+  
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then(windowClients => {
+        for (let client of windowClients) {
+          if (client.url.includes(urlToOpen) && 'focus' in client) {
+            return client.focus();
+          }
         }
-      } catch (error) {
-        console.error('Error syncing payment:', error);
-      }
-    }
-  } catch (error) {
-    console.error('Error in syncPayments:', error);
-  }
-}
-
-// IndexedDB para almacenamiento offline
-function openDB() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open('TenantCRMOffline', 1);
-    
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
-    
-    request.onupgradeneeded = event => {
-      const db = event.target.result;
-      if (!db.objectStoreNames.contains('pendingPayments')) {
-        db.createObjectStore('pendingPayments', { keyPath: 'id' });
-      }
-      if (!db.objectStoreNames.contains('pendingContracts')) {
-        db.createObjectStore('pendingContracts', { keyPath: 'id' });
-      }
-    };
-  });
-}
+        if (clients.openWindow) {
+          return clients.openWindow(urlToOpen);
+        }
+      })
+  );
+});

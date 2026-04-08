@@ -85,10 +85,10 @@ async function loadData() {
         const [tenants, contracts] = await Promise.all([
             fetch('/.netlify/functions/tenants', {
                 headers: { 'Authorization': token }
-            }).then(r => r.json()),
+            }).then(r => r.ok ? r.json() : []),
             fetch('/.netlify/functions/contracts', {
                 headers: { 'Authorization': token }
-            }).then(r => r.json())
+            }).then(r => r.ok ? r.json() : [])
         ]);
         
         currentData.tenants = tenants || [];
@@ -117,18 +117,15 @@ function aplicarFiltros() {
         return;
     }
     
-    // Actualizar texto del período
     document.getElementById('periodoTexto').textContent = 
         `${dateFrom.toLocaleDateString()} - ${dateTo.toLocaleDateString()}`;
     
-    // Filtrar contratos por fecha
     currentData.filteredContracts = currentData.contracts.filter(c => {
         if (!c.created_at) return false;
         const createdDate = new Date(c.created_at);
         return createdDate >= dateFrom && createdDate <= dateTo;
     });
     
-    // Filtrar inquilinos por fecha
     currentData.filteredTenants = currentData.tenants.filter(t => {
         if (!t.created_at) return false;
         const createdDate = new Date(t.created_at);
@@ -152,16 +149,25 @@ function cambiarTipoReporte() {
     aplicarFiltros();
 }
 
-function generarReporteCompleto() {
+// ============================================
+// FUNCIONES PRINCIPALES DEL REPORTE
+// ============================================
+
+async function generarReporteCompleto() {
     console.log('📑 Generando reporte completo...');
     
-    actualizarKPIs();
+    await actualizarKPIs();
     actualizarGraficos();
-    actualizarTablaIngresos();
-    actualizarTablaInquilinos();
-    actualizarTablaContratos();
-    actualizarTablaAumentos();
+    await actualizarTablaIngresos();
+    await actualizarTablaPropietarios();
+    await actualizarTablaInquilinos();
+    await actualizarTablaContratos();
+    await actualizarTablaAumentos();
     actualizarResumenEjecutivo();
+    
+    // Cargar y agregar pagos
+    const pagos = await cargarPagosReportes();
+    agregarTablaPagos(pagos);
 }
 
 async function actualizarKPIs() {
@@ -171,56 +177,21 @@ async function actualizarKPIs() {
     let totalPendingIncome = 0;
     
     try {
-        // Obtener fechas del filtro
         const dateFromInput = document.getElementById('dateFrom').value;
         const dateToInput = document.getElementById('dateTo').value;
         
-        console.log('Fechas seleccionadas:', { dateFromInput, dateToInput });
-        
-        // Si no hay fechas, usar el período por defecto
         const dateFrom = dateFromInput ? new Date(dateFromInput) : new Date(new Date().setDate(new Date().getDate() - 30));
         const dateTo = dateToInput ? new Date(dateToInput) : new Date();
         dateTo.setHours(23, 59, 59);
         
-        console.log('Fechas convertidas:', { dateFrom, dateTo });
-        
-        // Cargar pagos
         const pagos = await cargarPagosReportes();
-        console.log('Total pagos cargados:', pagos.length);
         
-        // Mostrar todos los pagos para debug
-        console.log('Todos los pagos:', pagos.map(p => ({
-            id: p.id,
-            status: p.status,
-            total_amount: p.total_amount,
-            paid_at: p.paid_at,
-            created_at: p.created_at,
-            due_date: p.due_date
-        })));
-        
-        // Filtrar pagos por fecha de pago (paid_at) o fecha de creación
         const pagosFiltrados = pagos.filter(p => {
-            // Usar paid_at si existe, sino created_at
             const fechaPago = p.paid_at ? new Date(p.paid_at) : (p.created_at ? new Date(p.created_at) : null);
-            
             if (!fechaPago) return false;
-            
-            const dentroDeRango = fechaPago >= dateFrom && fechaPago <= dateTo;
-            
-            if (dentroDeRango) {
-                console.log(`Pago ${p.id} dentro del rango:`, {
-                    fecha: fechaPago,
-                    monto: p.total_amount,
-                    status: p.status
-                });
-            }
-            
-            return dentroDeRango;
+            return fechaPago >= dateFrom && fechaPago <= dateTo;
         });
         
-        console.log('Pagos filtrados por fecha:', pagosFiltrados.length);
-        
-        // Calcular ingresos por pagos REALIZADOS
         totalPaidIncome = pagosFiltrados
             .filter(p => p.status === 'paid')
             .reduce((sum, p) => sum + (Number(p.total_amount) || 0), 0);
@@ -229,26 +200,15 @@ async function actualizarKPIs() {
             .filter(p => p.status === 'pending')
             .reduce((sum, p) => sum + (Number(p.total_amount) || 0), 0);
         
-        console.log('Ingresos calculados:', {
-            totalPaidIncome,
-            totalPendingIncome,
-            cantidadPagados: pagosFiltrados.filter(p => p.status === 'paid').length,
-            cantidadPendientes: pagosFiltrados.filter(p => p.status === 'pending').length
-        });
-        
     } catch (error) {
         console.error('Error en actualizarKPIs:', error);
     }
     
-    // Calcular ingresos por contratos (respaldo)
     const totalContractIncome = currentData.filteredContracts.reduce((sum, c) => {
         return sum + (parseFloat(c.base_amount) || 0);
     }, 0);
     
-    // USAR INGRESOS REALES DE PAGOS (si hay) O FALLBACK A CONTRATOS
     const totalIncome = totalPaidIncome > 0 ? totalPaidIncome : totalContractIncome;
-    
-    console.log('Total income final:', totalIncome);
     
     const avgContract = currentData.filteredContracts.length > 0 
         ? totalIncome / currentData.filteredContracts.length 
@@ -261,13 +221,11 @@ async function actualizarKPIs() {
         return sum + commission;
     }, 0);
     
-    // Actualizar DOM
     document.getElementById('totalIncome').textContent = UI.formatCurrency(totalIncome);
     document.getElementById('avgContract').textContent = UI.formatCurrency(avgContract);
     document.getElementById('totalIncreases').textContent = totalIncreases;
     document.getElementById('totalCommissions').textContent = UI.formatCurrency(totalCommissions);
     
-    // Mostrar detalle en el período
     const incomePeriod = document.getElementById('incomePeriod');
     if (incomePeriod) {
         incomePeriod.innerHTML = `
@@ -312,8 +270,9 @@ function actualizarGraficoIngresos() {
             datasets: [{
                 label: 'Ingresos ($)',
                 data: sortedMonths.map(m => monthlyData[m]),
-                backgroundColor: '#3b82f6',
-                borderRadius: 6
+                backgroundColor: '#4f46e5',
+                borderRadius: 6,
+                borderSkipped: false
             }]
         },
         options: {
@@ -349,15 +308,24 @@ function actualizarGraficoDistribucion() {
             labels: ['Activos', 'Pendientes', 'Vencidos', 'Terminados'],
             datasets: [{
                 data: [statusCounts.active, statusCounts.pending, statusCounts.expired, statusCounts.terminated],
-                backgroundColor: ['#10b981', '#f59e0b', '#ef4444', '#6b7280']
+                backgroundColor: ['#10b981', '#f59e0b', '#ef4444', '#cbd5e1'],
+                hoverBackgroundColor: ['#059669', '#d97706', '#dc2626', '#94a3b8'],
+                borderWidth: 2,
+                borderColor: '#ffffff',
+                hoverOffset: 4
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
-                legend: { position: 'bottom' },
+                legend: { position: 'bottom', labels: { font: { family: 'Inter', size: 12 } } },
                 tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                    titleFont: { family: 'Inter', size: 13 },
+                    bodyFont: { family: 'Inter', size: 14, weight: 'bold' },
+                    padding: 12,
+                    cornerRadius: 8,
                     callbacks: {
                         label: (context) => {
                             const total = context.dataset.data.reduce((a, b) => a + b, 0);
@@ -371,72 +339,135 @@ function actualizarGraficoDistribucion() {
     });
 }
 
-function actualizarTablaIngresos() {
+// ============================================
+// TABLAS DEL REPORTE
+// ============================================
+
+async function actualizarTablaIngresos() {
     const tbody = document.getElementById('incomeTableBody');
     const tfoot = document.getElementById('incomeTableFooter');
     
     if (currentData.filteredContracts.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-gray-500">No hay datos</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-gray-500">No hay datos</td></tr>';
         tfoot.innerHTML = '';
         return;
     }
     
-    // Cargar pagos para mostrar estado real
-    cargarPagosReportes().then(pagos => {
-        const pagosMap = new Map();
-        pagos.forEach(p => {
-            if (p.contract_id) {
-                pagosMap.set(p.contract_id, p);
-            }
+    const pagos = await cargarPagosReportes();
+    const pagosMap = new Map();
+    pagos.forEach(p => {
+        if (p.contract_id) {
+            pagosMap.set(p.contract_id, p);
+        }
+    });
+    
+    let totalBase = 0;
+    let totalComision = 0;
+    let totalGeneral = 0;
+    let totalPagado = 0;
+    
+    tbody.innerHTML = currentData.filteredContracts.map(c => {
+        const base = parseFloat(c.base_amount) || 0;
+        const comision = base * (parseFloat(c.agent_commission) || 5) / 100;
+        const total = base + comision;
+        
+        const pago = pagosMap.get(c.id);
+        const pagado = pago && pago.status === 'paid' ? pago.total_amount : 0;
+        
+        totalBase += base;
+        totalComision += comision;
+        totalGeneral += total;
+        totalPagado += pagado;
+        
+        const estadoClass = pagado > 0 ? 'text-green-600' : 'text-yellow-600';
+        const estadoText = pagado > 0 ? 'Pagado' : 'Pendiente';
+        
+        return `
+            <tr>
+                <td class="px-4 py-2">${UI.formatDate(c.created_at)}</td>
+                <td class="px-4 py-2">${escapeHtml(c.tenant_name || 'N/A')}</td>
+                <td class="px-4 py-2">#${c.id}</td>
+                <td class="px-4 py-2">${escapeHtml(c.owner || 'N/A')}</td>
+                <td class="px-4 py-2 text-right">${UI.formatCurrency(base)}</td>
+                <td class="px-4 py-2 text-right">${UI.formatCurrency(comision)}</td>
+                <td class="px-4 py-2 text-right font-medium">${UI.formatCurrency(total)}</td>
+                <td class="px-4 py-2 text-center">
+                    <span class="${estadoClass} font-medium">${estadoText}</span>
+                </td>
+            </tr>
+        `;
+    }).join('');
+    
+    tfoot.innerHTML = `
+        <tr class="bg-gray-100 font-bold">
+            <td colspan="4" class="px-4 py-2 text-right">TOTALES:</td>
+            <td class="px-4 py-2 text-right">${UI.formatCurrency(totalBase)}</td>
+            <td class="px-4 py-2 text-right">${UI.formatCurrency(totalComision)}</td>
+            <td class="px-4 py-2 text-right text-blue-600">${UI.formatCurrency(totalGeneral)}</td>
+            <td class="px-4 py-2 text-right text-green-600">${UI.formatCurrency(totalPagado)}</td>
+        </tr>
+    `;
+}
+
+async function actualizarTablaPropietarios() {
+    const tbody = document.getElementById('ownerReportTableBody');
+    if (!tbody) return;
+    
+    try {
+        const token = localStorage.getItem('authToken');
+        const response = await fetch('/.netlify/functions/owners', {
+            headers: { 'Authorization': token }
         });
         
-        let totalBase = 0;
-        let totalComision = 0;
-        let totalGeneral = 0;
-        let totalPagado = 0;
+        if (!response.ok) throw new Error('Error cargando propietarios');
         
-        tbody.innerHTML = currentData.filteredContracts.map(c => {
-            const base = parseFloat(c.base_amount) || 0;
-            const comision = base * (parseFloat(c.agent_commission) || 5) / 100;
-            const total = base + comision;
+        const propietarios = await response.json();
+        
+        if (!propietarios || propietarios.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">No hay propietarios registrados</td></tr>';
+            return;
+        }
+        
+        let totalGlobalBruto = 0;
+        let totalGlobalComision = 0;
+        let totalGlobalNeto = 0;
+        
+        tbody.innerHTML = propietarios.map(p => {
+            const totalBruto = p.total_income || 0;
+            const comision = totalBruto * 0.05;
+            const ingresoNeto = totalBruto - comision;
             
-            const pago = pagosMap.get(c.id);
-            const pagado = pago && pago.status === 'paid' ? pago.total_amount : 0;
-            
-            totalBase += base;
-            totalComision += comision;
-            totalGeneral += total;
-            totalPagado += pagado;
-            
-            const estadoClass = pagado > 0 ? 'text-green-600' : 'text-yellow-600';
-            const estadoText = pagado > 0 ? 'Pagado' : 'Pendiente';
+            totalGlobalBruto += totalBruto;
+            totalGlobalComision += comision;
+            totalGlobalNeto += ingresoNeto;
             
             return `
-                <tr>
-                    <td class="px-4 py-2">${UI.formatDate(c.created_at)}</td>
-                    <td class="px-4 py-2">${escapeHtml(c.tenant_name || 'N/A')}</td>
-                    <td class="px-4 py-2">#${c.id}</td>
-                    <td class="px-4 py-2">${escapeHtml(c.owner || 'N/A')}</td>
-                    <td class="px-4 py-2 text-right">${UI.formatCurrency(base)}</td>
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-2 font-medium">${escapeHtml(p.name)}</td>
+                    <td class="px-4 py-2 text-center">${p.total_contracts || 0}</td>
+                    <td class="px-4 py-2 text-center">-</td>
+                    <td class="px-4 py-2 text-right">${UI.formatCurrency(totalBruto)}</td>
                     <td class="px-4 py-2 text-right">${UI.formatCurrency(comision)}</td>
-                    <td class="px-4 py-2 text-right font-medium">${UI.formatCurrency(total)}</td>
-                    <td class="px-4 py-2 text-center">
-                        <span class="badge ${estadoClass}">${estadoText}</span>
-                    </td>
+                    <td class="px-4 py-2 text-right font-bold text-green-600">${UI.formatCurrency(ingresoNeto)}</td>
                 </tr>
             `;
         }).join('');
         
-        tfoot.innerHTML = `
-            <tr>
-                <td colspan="4" class="px-4 py-2 text-right font-bold">TOTALES:</td>
-                <td class="px-4 py-2 text-right font-bold">${UI.formatCurrency(totalBase)}</td>
-                <td class="px-4 py-2 text-right font-bold">${UI.formatCurrency(totalComision)}</td>
-                <td class="px-4 py-2 text-right font-bold text-blue-600">${UI.formatCurrency(totalGeneral)}</td>
-                <td class="px-4 py-2 text-right font-bold text-green-600">${UI.formatCurrency(totalPagado)}</td>
+        tbody.innerHTML += `
+            <tr class="bg-gray-100 font-bold">
+                <td class="px-4 py-2">TOTALES</td>
+                <td class="px-4 py-2 text-center">-</td>
+                <td class="px-4 py-2 text-center">-</td>
+                <td class="px-4 py-2 text-right">${UI.formatCurrency(totalGlobalBruto)}</td>
+                <td class="px-4 py-2 text-right">${UI.formatCurrency(totalGlobalComision)}</td>
+                <td class="px-4 py-2 text-right text-green-700">${UI.formatCurrency(totalGlobalNeto)}</td>
             </tr>
         `;
-    });
+        
+    } catch (error) {
+        console.error('Error cargando reporte de propietarios:', error);
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-red-500">Error al cargar el reporte de propietarios: ${error.message}</td></tr>`;
+    }
 }
 
 function actualizarTablaInquilinos() {
@@ -466,9 +497,9 @@ function actualizarTablaInquilinos() {
     }).join('');
     
     tfoot.innerHTML = `
-        <tr>
-            <td colspan="6" class="px-4 py-2 text-right font-bold">TOTAL INQUILINOS:</td>
-            <td class="px-4 py-2 text-center font-bold text-green-600">${currentData.filteredTenants.length}</td>
+        <tr class="bg-gray-100 font-bold">
+            <td colspan="6" class="px-4 py-2 text-right">TOTAL INQUILINOS:</td>
+            <td class="px-4 py-2 text-center text-green-600">${currentData.filteredTenants.length}</td>
         </tr>
     `;
 }
@@ -507,9 +538,9 @@ function actualizarTablaContratos() {
     }).join('');
     
     tfoot.innerHTML = `
-        <tr>
-            <td colspan="3" class="px-4 py-2 text-right font-bold">TOTAL MONTO CONTRATOS:</td>
-            <td class="px-4 py-2 text-right font-bold text-purple-600">${UI.formatCurrency(totalMonto)}</td>
+        <tr class="bg-gray-100 font-bold">
+            <td colspan="3" class="px-4 py-2 text-right">TOTAL MONTO CONTRATOS:</td>
+            <td class="px-4 py-2 text-right text-purple-600">${UI.formatCurrency(totalMonto)}</td>
             <td colspan="4"></td>
         </tr>
     `;
@@ -527,17 +558,17 @@ function actualizarTablaAumentos() {
         return;
     }
     
-    const today = new Date();
+    const todayDate = new Date();
     
     tbody.innerHTML = aumentos.map(c => {
         const baseAmount = parseFloat(c.base_amount) || 0;
         const increasePercentage = parseFloat(c.increase_value) || 0;
         const newAmount = c.increase_type === 'fixed' 
             ? baseAmount * (1 + increasePercentage / 100)
-            : baseAmount * 1.035; // Estimado para IPC/IPS
+            : baseAmount * 1.035;
         
         const nextDate = new Date(c.next_increase_date);
-        const diffDays = Math.ceil((nextDate - today) / (1000 * 60 * 60 * 24));
+        const diffDays = Math.ceil((nextDate - todayDate) / (1000 * 60 * 60 * 24));
         
         return `
             <tr>
@@ -604,140 +635,6 @@ function actualizarResumenEjecutivo() {
     `;
 }
 
-// Funciones de exportación - VERSIÓN CORREGIDA
-window.exportarExcelCompleto = async function() {
-    try {
-        const wb = XLSX.utils.book_new();
-        
-        // Hoja de ingresos
-        const incomeData = currentData.filteredContracts.map(c => ({
-            Fecha: UI.formatDate(c.created_at),
-            Inquilino: c.tenant_name,
-            Contrato: c.id,
-            Propietario: c.owner,
-            'Monto Base': c.base_amount,
-            Comisión: (c.base_amount * (c.agent_commission || 5) / 100).toFixed(2),
-            Total: (c.base_amount * (1 + (c.agent_commission || 5) / 100)).toFixed(2)
-        }));
-        const wsIncome = XLSX.utils.json_to_sheet(incomeData);
-        XLSX.utils.book_append_sheet(wb, wsIncome, 'Ingresos');
-        
-        // Hoja de inquilinos
-        const tenantsData = currentData.tenants.map(t => ({
-            Fecha: UI.formatDate(t.created_at),
-            DNI: t.dni,
-            Nombre: t.name,
-            Email: t.email,
-            Teléfono: t.phone,
-            Dirección: t.address,
-            Contratos: currentData.contracts.filter(c => c.tenant_id === t.id).length
-        }));
-        const wsTenants = XLSX.utils.json_to_sheet(tenantsData);
-        XLSX.utils.book_append_sheet(wb, wsTenants, 'Inquilinos');
-        
-        // Hoja de contratos
-        const contractsData = currentData.contracts.map(c => ({
-            Fecha: UI.formatDate(c.created_at),
-            Inquilino: c.tenant_name,
-            Propietario: c.owner,
-            Monto: c.base_amount,
-            Duración: c.duration,
-            Inicio: c.start_date,
-            Fin: c.end_date,
-            Estado: c.status
-        }));
-        const wsContracts = XLSX.utils.json_to_sheet(contractsData);
-        XLSX.utils.book_append_sheet(wb, wsContracts, 'Contratos');
-
-        // Hoja de pagos
-        try {
-            const pagos = await cargarPagosReportes();
-            if (pagos && pagos.length > 0) {
-                const pagosData = pagos.map(p => ({
-                    Fecha: UI.formatDate(p.created_at),
-                    Inquilino: p.tenant_name || 'N/A',
-                    Contrato: p.contract_id,
-                    Concepto: p.concept_name || 'Alquiler',
-                    Monto: p.amount,
-                    Comisión: p.commission || 0,
-                    Total: p.total_amount,
-                    Vencimiento: UI.formatDate(p.due_date),
-                    Estado: p.status === 'paid' ? 'Pagado' : 'Pendiente'
-                }));
-                const wsPagos = XLSX.utils.json_to_sheet(pagosData);
-                XLSX.utils.book_append_sheet(wb, wsPagos, 'Pagos');
-            }
-        } catch (error) {
-            console.error('Error agregando pagos al Excel:', error);
-            UI.toast('Error al cargar pagos para Excel', 'warning');
-        }
-        
-        // Guardar archivo
-        XLSX.writeFile(wb, `reporte_completo_${new Date().toISOString().split('T')[0]}.xlsx`);
-        UI.toast('Reporte Excel generado correctamente', 'success');
-        
-    } catch (error) {
-        console.error('Error exportando Excel:', error);
-        UI.toast('Error al generar Excel: ' + error.message, 'error');
-    }
-};
-
-window.exportarPDFCompleto = function() {
-    try {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF('p', 'mm', 'a4');
-        
-        doc.setFontSize(18);
-        doc.setTextColor(37, 99, 235);
-        doc.text('TENANT CRM', 14, 22);
-        
-        doc.setFontSize(11);
-        doc.setTextColor(0, 0, 0);
-        doc.text('Reporte Completo de Gestión', 14, 32);
-        doc.text(`Fecha: ${new Date().toLocaleDateString('es-ES')}`, 14, 38);
-        
-        // Resumen ejecutivo
-        doc.setFontSize(14);
-        doc.setTextColor(37, 99, 235);
-        doc.text('Resumen Ejecutivo', 14, 48);
-        
-        doc.setFontSize(10);
-        doc.setTextColor(0, 0, 0);
-        doc.text(`Total Ingresos: ${UI.formatCurrency(currentData.filteredContracts.reduce((s, c) => s + (parseFloat(c.base_amount) || 0), 0))}`, 14, 56);
-        doc.text(`Total Inquilinos: ${currentData.tenants.length}`, 14, 62);
-        doc.text(`Contratos Activos: ${currentData.contracts.filter(c => c.status === 'active').length}`, 14, 68);
-        
-        // Tabla de contratos
-        doc.autoTable({
-            head: [['Inquilino', 'Monto', 'Estado']],
-            body: currentData.contracts.slice(0, 20).map(c => [
-                c.tenant_name || 'N/A',
-                UI.formatCurrency(c.base_amount),
-                c.status === 'active' ? 'Activo' : c.status
-            ]),
-            startY: 80,
-            theme: 'striped',
-            headStyles: { fillColor: [37, 99, 235] }
-        });
-        
-        doc.save(`reporte_${new Date().toISOString().split('T')[0]}.pdf`);
-        UI.toast('PDF generado correctamente', 'success');
-    } catch (error) {
-        console.error('Error exportando PDF:', error);
-        UI.toast('Error al generar PDF', 'error');
-    }
-};
-
-function escapeHtml(text) {
-    if (!text) return '';
-    return String(text)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
-
 // ============================================
 // FUNCIONES DE PAGOS PARA REPORTES
 // ============================================
@@ -757,7 +654,6 @@ async function cargarPagosReportes() {
 }
 
 function agregarTablaPagos(pagos) {
-    // Verificar si ya existe la tabla
     if (document.getElementById('paymentsReportTable')) return;
     
     const container = document.querySelector('#reporteCompleto .space-y-6');
@@ -831,21 +727,134 @@ function agregarTablaPagos(pagos) {
     container.insertAdjacentHTML('beforeend', tablaHTML);
 }
 
-// Modificar la función generarReporteCompleto para incluir pagos
-async function generarReporteCompleto() {
-    console.log('📑 Generando reporte completo con pagos...');
-    
-    actualizarKPIs();
-    actualizarGraficos();
-    actualizarTablaIngresos();
-    actualizarTablaInquilinos();
-    actualizarTablaContratos();
-    actualizarTablaAumentos();
-    actualizarResumenEjecutivo();
-    
-    // Cargar y agregar pagos
-    const pagos = await cargarPagosReportes();
-    agregarTablaPagos(pagos);
+// ============================================
+// FUNCIONES DE EXPORTACIÓN
+// ============================================
+
+window.exportarExcelCompleto = async function() {
+    try {
+        const wb = XLSX.utils.book_new();
+        
+        const incomeData = currentData.filteredContracts.map(c => ({
+            Fecha: UI.formatDate(c.created_at),
+            Inquilino: c.tenant_name,
+            Contrato: c.id,
+            Propietario: c.owner,
+            'Monto Base': c.base_amount,
+            Comisión: (c.base_amount * (c.agent_commission || 5) / 100).toFixed(2),
+            Total: (c.base_amount * (1 + (c.agent_commission || 5) / 100)).toFixed(2)
+        }));
+        const wsIncome = XLSX.utils.json_to_sheet(incomeData);
+        XLSX.utils.book_append_sheet(wb, wsIncome, 'Ingresos');
+        
+        const tenantsData = currentData.tenants.map(t => ({
+            Fecha: UI.formatDate(t.created_at),
+            DNI: t.dni,
+            Nombre: t.name,
+            Email: t.email,
+            Teléfono: t.phone,
+            Dirección: t.address,
+            Contratos: currentData.contracts.filter(c => c.tenant_id === t.id).length
+        }));
+        const wsTenants = XLSX.utils.json_to_sheet(tenantsData);
+        XLSX.utils.book_append_sheet(wb, wsTenants, 'Inquilinos');
+        
+        const contractsData = currentData.contracts.map(c => ({
+            Fecha: UI.formatDate(c.created_at),
+            Inquilino: c.tenant_name,
+            Propietario: c.owner,
+            Monto: c.base_amount,
+            Duración: c.duration,
+            Inicio: c.start_date,
+            Fin: c.end_date,
+            Estado: c.status
+        }));
+        const wsContracts = XLSX.utils.json_to_sheet(contractsData);
+        XLSX.utils.book_append_sheet(wb, wsContracts, 'Contratos');
+
+        try {
+            const pagos = await cargarPagosReportes();
+            if (pagos && pagos.length > 0) {
+                const pagosData = pagos.map(p => ({
+                    Fecha: UI.formatDate(p.created_at),
+                    Inquilino: p.tenant_name || 'N/A',
+                    Contrato: p.contract_id,
+                    Concepto: p.concept_name || 'Alquiler',
+                    Monto: p.amount,
+                    Comisión: p.commission || 0,
+                    Total: p.total_amount,
+                    Vencimiento: UI.formatDate(p.due_date),
+                    Estado: p.status === 'paid' ? 'Pagado' : 'Pendiente'
+                }));
+                const wsPagos = XLSX.utils.json_to_sheet(pagosData);
+                XLSX.utils.book_append_sheet(wb, wsPagos, 'Pagos');
+            }
+        } catch (error) {
+            console.error('Error agregando pagos al Excel:', error);
+            UI.toast('Error al cargar pagos para Excel', 'warning');
+        }
+        
+        XLSX.writeFile(wb, `reporte_completo_${new Date().toISOString().split('T')[0]}.xlsx`);
+        UI.toast('Reporte Excel generado correctamente', 'success');
+        
+    } catch (error) {
+        console.error('Error exportando Excel:', error);
+        UI.toast('Error al generar Excel: ' + error.message, 'error');
+    }
+};
+
+window.exportarPDFCompleto = function() {
+    try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+        
+        doc.setFontSize(18);
+        doc.setTextColor(37, 99, 235);
+        doc.text('TENANT CRM', 14, 22);
+        
+        doc.setFontSize(11);
+        doc.setTextColor(0, 0, 0);
+        doc.text('Reporte Completo de Gestión', 14, 32);
+        doc.text(`Fecha: ${new Date().toLocaleDateString('es-ES')}`, 14, 38);
+        
+        doc.setFontSize(14);
+        doc.setTextColor(37, 99, 235);
+        doc.text('Resumen Ejecutivo', 14, 48);
+        
+        doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
+        doc.text(`Total Ingresos: ${UI.formatCurrency(currentData.filteredContracts.reduce((s, c) => s + (parseFloat(c.base_amount) || 0), 0))}`, 14, 56);
+        doc.text(`Total Inquilinos: ${currentData.tenants.length}`, 14, 62);
+        doc.text(`Contratos Activos: ${currentData.contracts.filter(c => c.status === 'active').length}`, 14, 68);
+        
+        doc.autoTable({
+            head: [['Inquilino', 'Monto', 'Estado']],
+            body: currentData.contracts.slice(0, 20).map(c => [
+                c.tenant_name || 'N/A',
+                UI.formatCurrency(c.base_amount),
+                c.status === 'active' ? 'Activo' : c.status
+            ]),
+            startY: 80,
+            theme: 'striped',
+            headStyles: { fillColor: [37, 99, 235] }
+        });
+        
+        doc.save(`reporte_${new Date().toISOString().split('T')[0]}.pdf`);
+        UI.toast('PDF generado correctamente', 'success');
+    } catch (error) {
+        console.error('Error exportando PDF:', error);
+        UI.toast('Error al generar PDF', 'error');
+    }
+};
+
+function escapeHtml(text) {
+    if (!text) return '';
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 // Funciones globales

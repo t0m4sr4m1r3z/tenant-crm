@@ -358,14 +358,18 @@ function createIncomeChart(contracts, year) {
     const canvas = document.getElementById('incomeChart');
     if (!canvas) return;
     
-    const ctx = canvas.getContext('2d');
-    
-    if (incomeChart) {
-        incomeChart.destroy();
+    // Empty state handling via DOM instead of raw canvas to prevent resize bug
+    let emptyStateDiv = document.getElementById('incomeChartEmptyState');
+    if (!emptyStateDiv) {
+        emptyStateDiv = document.createElement('div');
+        emptyStateDiv.id = 'incomeChartEmptyState';
+        emptyStateDiv.className = 'absolute inset-0 flex items-center justify-center text-slate-400 font-medium bg-slate-50/50 rounded-xl backdrop-blur-sm z-10 hidden';
+        emptyStateDiv.textContent = 'No hay datos para el año seleccionado';
+        canvas.parentElement.appendChild(emptyStateDiv);
     }
     
+    // Mostrar u ocultar canvas/empty state
     const monthlyData = new Array(12).fill(0);
-    
     contracts.filter(c => c && c.status === 'active' && c.start_date).forEach(contract => {
         try {
             const startDate = new Date(contract.start_date);
@@ -379,12 +383,26 @@ function createIncomeChart(contracts, year) {
     const hasData = monthlyData.some(v => v > 0);
     
     if (!hasData) {
-        ctx.font = '14px Arial';
-        ctx.fillStyle = '#9ca3af';
-        ctx.textAlign = 'center';
-        ctx.fillText('No hay datos para el año seleccionado', canvas.width/2, canvas.height/2);
+        canvas.style.display = 'none';
+        emptyStateDiv.classList.remove('hidden');
+        if (incomeChart) {
+            incomeChart.destroy();
+            incomeChart = null;
+        }
         return;
+    } else {
+        canvas.style.display = 'block';
+        emptyStateDiv.classList.add('hidden');
     }
+    
+    const ctx = canvas.getContext('2d');
+    if (incomeChart) {
+        incomeChart.destroy();
+    }
+    
+    const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+    gradient.addColorStop(0, 'rgba(79, 70, 229, 0.4)'); // primary-600
+    gradient.addColorStop(1, 'rgba(79, 70, 229, 0.0)');
     
     incomeChart = new Chart(ctx, {
         type: 'line',
@@ -393,8 +411,14 @@ function createIncomeChart(contracts, year) {
             datasets: [{
                 label: 'Ingresos ($)',
                 data: monthlyData,
-                borderColor: '#3b82f6',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                borderColor: '#4f46e5',
+                backgroundColor: gradient,
+                borderWidth: 3,
+                pointBackgroundColor: '#ffffff',
+                pointBorderColor: '#4f46e5',
+                pointBorderWidth: 2,
+                pointRadius: 4,
+                pointHoverRadius: 6,
                 tension: 0.4,
                 fill: true
             }]
@@ -402,11 +426,40 @@ function createIncomeChart(contracts, year) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
+            plugins: { 
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                    titleFont: { family: 'Inter', size: 13 },
+                    bodyFont: { family: 'Inter', size: 14, weight: 'bold' },
+                    padding: 12,
+                    cornerRadius: 8,
+                    displayColors: false,
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) { label += ': '; }
+                            if (context.parsed.y !== null) { label += UI.formatCurrency(context.parsed.y); }
+                            return label;
+                        }
+                    }
+                }
+            },
+            interaction: {
+                intersect: false,
+                mode: 'index',
+            },
             scales: {
                 y: {
                     beginAtZero: true,
-                    ticks: { callback: value => UI.formatCurrency(value) }
+                    border: { display: false },
+                    grid: { color: 'rgba(2f, 41, 59, 0.05)', drawBorder: false },
+                    ticks: { callback: value => UI.formatCurrency(value), font: { family: 'Inter', size: 11 }, color: '#64748b' }
+                },
+                x: {
+                    border: { display: false },
+                    grid: { display: false },
+                    ticks: { font: { family: 'Inter', size: 11 }, color: '#64748b' }
                 }
             }
         }
@@ -417,10 +470,13 @@ function createStatusChart(contracts) {
     const canvas = document.getElementById('statusChart');
     if (!canvas) return;
     
-    const ctx = canvas.getContext('2d');
-    
-    if (statusChart) {
-        statusChart.destroy();
+    let emptyStateDiv = document.getElementById('statusChartEmptyState');
+    if (!emptyStateDiv) {
+        emptyStateDiv = document.createElement('div');
+        emptyStateDiv.id = 'statusChartEmptyState';
+        emptyStateDiv.className = 'absolute inset-0 flex items-center justify-center text-slate-400 font-medium bg-slate-50/50 rounded-xl backdrop-blur-sm z-10 hidden';
+        emptyStateDiv.textContent = 'No hay contratos para mostrar';
+        canvas.parentElement.appendChild(emptyStateDiv);
     }
     
     const statusCounts = {
@@ -433,11 +489,24 @@ function createStatusChart(contracts) {
     const hasData = Object.values(statusCounts).some(v => v > 0);
     
     if (!hasData) {
-        ctx.font = '14px Arial';
-        ctx.fillStyle = '#9ca3af';
-        ctx.textAlign = 'center';
-        ctx.fillText('No hay contratos para mostrar', canvas.width/2, canvas.height/2);
+        canvas.style.display = 'none';
+        emptyStateDiv.classList.remove('hidden');
+        if (statusChart) {
+            statusChart.destroy();
+            statusChart = null;
+        }
+        
+        const legend = document.getElementById('statusLegend');
+        if (legend) legend.innerHTML = '';
         return;
+    } else {
+        canvas.style.display = 'block';
+        emptyStateDiv.classList.add('hidden');
+    }
+    
+    const ctx = canvas.getContext('2d');
+    if (statusChart) {
+        statusChart.destroy();
     }
     
     statusChart = new Chart(ctx, {
@@ -446,15 +515,28 @@ function createStatusChart(contracts) {
             labels: ['Activos', 'Pendientes', 'Vencidos', 'Terminados'],
             datasets: [{
                 data: [statusCounts.active, statusCounts.pending, statusCounts.expired, statusCounts.terminated],
-                backgroundColor: ['#10b981', '#f59e0b', '#ef4444', '#6b7280'],
-                borderWidth: 0
+                backgroundColor: ['#10b981', '#f59e0b', '#ef4444', '#cbd5e1'],
+                hoverBackgroundColor: ['#059669', '#d97706', '#dc2626', '#94a3b8'],
+                borderWidth: 2,
+                borderColor: '#ffffff',
+                hoverOffset: 4
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            cutout: '70%'
+            plugins: { 
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                    titleFont: { family: 'Inter', size: 13 },
+                    bodyFont: { family: 'Inter', size: 14, weight: 'bold' },
+                    padding: 12,
+                    cornerRadius: 8
+                }
+            },
+            cutout: '75%',
+            animation: { animateScale: true, animateRotate: true }
         }
     });
     
@@ -462,10 +544,10 @@ function createStatusChart(contracts) {
     if (legend) {
         const total = Object.values(statusCounts).reduce((a, b) => a + b, 0);
         legend.innerHTML = `
-            <div class="flex items-center"><span class="w-3 h-3 bg-green-500 rounded-full mr-2"></span>Activos: ${statusCounts.active} (${total > 0 ? ((statusCounts.active/total)*100).toFixed(1) : 0}%)</div>
-            <div class="flex items-center"><span class="w-3 h-3 bg-yellow-500 rounded-full mr-2"></span>Pendientes: ${statusCounts.pending} (${total > 0 ? ((statusCounts.pending/total)*100).toFixed(1) : 0}%)</div>
-            <div class="flex items-center"><span class="w-3 h-3 bg-red-500 rounded-full mr-2"></span>Vencidos: ${statusCounts.expired} (${total > 0 ? ((statusCounts.expired/total)*100).toFixed(1) : 0}%)</div>
-            <div class="flex items-center"><span class="w-3 h-3 bg-gray-500 rounded-full mr-2"></span>Terminados: ${statusCounts.terminated} (${total > 0 ? ((statusCounts.terminated/total)*100).toFixed(1) : 0}%)</div>
+            <div class="flex items-center"><span class="w-3 h-3 bg-emerald-500 rounded-full mr-2 shadow-sm"></span>Activos: <span class="font-bold ml-1 text-slate-700">${statusCounts.active}</span></div>
+            <div class="flex items-center"><span class="w-3 h-3 bg-amber-500 rounded-full mr-2 shadow-sm"></span>Pendientes: <span class="font-bold ml-1 text-slate-700">${statusCounts.pending}</span></div>
+            <div class="flex items-center"><span class="w-3 h-3 bg-red-500 rounded-full mr-2 shadow-sm"></span>Vencidos: <span class="font-bold ml-1 text-slate-700">${statusCounts.expired}</span></div>
+            <div class="flex items-center"><span class="w-3 h-3 bg-slate-300 rounded-full mr-2 shadow-sm"></span>Clausurados: <span class="font-bold ml-1 text-slate-700">${statusCounts.terminated}</span></div>
         `;
     }
 }
@@ -555,3 +637,40 @@ function escapeHtml(text) {
         }[m];
     });
 }
+
+async function actualizarIndices() {
+    try {
+        const token = localStorage.getItem('authToken');
+        const response = await fetch('/.netlify/functions/indices', {
+            headers: { 'Authorization': token }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            
+            if (data.ipc) {
+                document.getElementById('ipcValue').textContent = `${data.ipc.monthly}%`;
+                document.getElementById('ipcDate').textContent = `Actualizado: ${UI.formatDate(data.ipc.date)}`;
+                document.getElementById('indicesUpdateTime').textContent = `Última actualización: ${new Date(data.updatedAt).toLocaleTimeString()}`;
+            }
+            
+            if (data.icl) {
+                document.getElementById('iclValue').textContent = `${data.icl.monthly}%`;
+                document.getElementById('iclDate').textContent = `Actualizado: ${UI.formatDate(data.icl.date)}`;
+            }
+            
+            UI.toast('Índices actualizados correctamente', 'success');
+        }
+    } catch (error) {
+        console.error('Error actualizando índices:', error);
+        UI.toast('Error al actualizar índices', 'error');
+    }
+}
+
+// Llamar al cargar el dashboard
+document.addEventListener('DOMContentLoaded', () => {
+    // ... código existente ...
+    actualizarIndices();
+    // Actualizar cada hora
+    setInterval(actualizarIndices, 3600000);
+});
