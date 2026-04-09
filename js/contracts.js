@@ -1154,7 +1154,7 @@ window.enviarReciboEmail = enviarReciboEmail;
 // ============================================
 
 let currentContractFiles = [];
-let cloudinaryCloudName = 'TU_CLOUD_NAME'; // Reemplaza con tu cloud_name
+let cloudinaryCloudName = 'dwapdg9aq'; // Reemplaza con tu cloud_name
 
 // Subir archivo a Cloudinary
 async function subirArchivoCloudinary(file, contractId) {
