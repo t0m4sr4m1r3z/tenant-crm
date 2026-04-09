@@ -131,36 +131,36 @@ function initNotificationsConfig() {
 }
 
 // ============================================
-// CONFIGURACIÓN DE ÍNDICES ECONÓMICOS
+// CONFIGURACIÓN DE ÍNDICES ECONÓMICOS (VERSIÓN CENTRALIZADA)
 // ============================================
 
-const INDICES_STORAGE_KEY = 'tenant_crm_indices';
-
-// Cargar índices guardados en localStorage
-function cargarIndicesGuardados() {
-    const saved = localStorage.getItem(INDICES_STORAGE_KEY);
-    if (saved) {
-        try {
-            const data = JSON.parse(saved);
-            const ipcInput = document.getElementById('ipcMensual');
-            const ipcFechaInput = document.getElementById('ipcFecha');
-            const iclInput = document.getElementById('iclMensual');
-            const iclFechaInput = document.getElementById('iclFecha');
-            
-            if (ipcInput && data.ipc) ipcInput.value = data.ipc.mensual;
-            if (ipcFechaInput && data.ipc) ipcFechaInput.value = data.ipc.fecha || '2026-03';
-            if (iclInput && data.icl) iclInput.value = data.icl.mensual;
-            if (iclFechaInput && data.icl) iclFechaInput.value = data.icl.fecha || '2026-03';
-            
-            return data;
-        } catch (e) {
-            console.error('Error parsing saved indices:', e);
-        }
+// Cargar índices actuales al iniciar
+async function cargarIndicesActuales() {
+    const indices = window.getIndices ? window.getIndices() : { ipc: 2.0, icl: 2.1, ipcFecha: '2026-03', iclFecha: '2026-03' };
+    
+    const ipcInput = document.getElementById('ipcMensual');
+    const ipcFechaInput = document.getElementById('ipcFecha');
+    const iclInput = document.getElementById('iclMensual');
+    const iclFechaInput = document.getElementById('iclFecha');
+    
+    if (ipcInput) ipcInput.value = indices.ipc;
+    if (ipcFechaInput) ipcFechaInput.value = indices.ipcFecha || '2026-03';
+    if (iclInput) iclInput.value = indices.icl;
+    if (iclFechaInput) iclFechaInput.value = indices.iclFecha || '2026-03';
+    
+    const ipcDisplay = document.getElementById('ipcActualDisplay');
+    const iclDisplay = document.getElementById('iclActualDisplay');
+    const fuente = window.INDICES_CONFIG?.ipc?.fuente || 'MANUAL';
+    
+    if (ipcDisplay) {
+        ipcDisplay.textContent = `${indices.ipc}% (${indices.ipcFecha || '2026-03'}) - Fuente: ${fuente}`;
     }
-    return null;
+    if (iclDisplay) {
+        iclDisplay.textContent = `${indices.icl}% (${indices.iclFecha || '2026-03'}) - Fuente: ${fuente}`;
+    }
 }
 
-// Guardar índices manuales
+// Guardar índices manuales usando el sistema central
 function guardarIndicesManuales() {
     const ipcInput = document.getElementById('ipcMensual');
     const ipcFechaInput = document.getElementById('ipcFecha');
@@ -182,14 +182,18 @@ function guardarIndicesManuales() {
         return;
     }
     
-    const indicesData = {
-        ipc: { mensual: ipc, fecha: ipcFecha },
-        icl: { mensual: icl, fecha: iclFecha },
-        actualizado: new Date().toISOString()
-    };
-    
-    localStorage.setItem(INDICES_STORAGE_KEY, JSON.stringify(indicesData));
-    window.indicesManuales = indicesData;
+    // Usar la función global de configuración si existe
+    if (window.guardarIndices) {
+        window.guardarIndices(ipc, icl, ipcFecha, iclFecha);
+    } else {
+        // Fallback manual
+        const indicesData = {
+            ipc: { mensual: ipc, fecha: ipcFecha },
+            icl: { mensual: icl, fecha: iclFecha },
+            actualizado: new Date().toISOString()
+        };
+        localStorage.setItem('indices_globales', JSON.stringify(indicesData));
+    }
     
     const statusEl = document.getElementById('indicesStatus');
     if (statusEl) {
@@ -203,60 +207,14 @@ function guardarIndicesManuales() {
     
     // Actualizar display
     cargarIndicesActuales();
+    
+    // Disparar evento para actualizar otros componentes
+    if (window.dispatchEvent) {
+        window.dispatchEvent(new CustomEvent('indicesActualizados'));
+    }
 }
 
-// Cargar índices actuales desde la API o localStorage
-async function cargarIndicesActuales() {
-    try {
-        const token = localStorage.getItem('authToken');
-        if (!token) return;
-        
-        const response = await fetch('/.netlify/functions/indices', {
-            headers: { 'Authorization': token }
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            
-            const ipcDisplay = document.getElementById('ipcActualDisplay');
-            const iclDisplay = document.getElementById('iclActualDisplay');
-            
-            if (ipcDisplay && data.ipc) {
-                ipcDisplay.textContent = `${data.ipc.monthly}% (${data.ipc.date}) - Fuente: ${data.ipc.source || 'API'}`;
-            }
-            if (iclDisplay && data.icl) {
-                iclDisplay.textContent = `${data.icl.monthly}% (${data.icl.date}) - Fuente: ${data.icl.source || 'API'}`;
-            }
-            return data;
-        }
-    } catch (error) {
-        console.error('Error cargando índices desde API:', error);
-    }
-    
-    // Fallback a localStorage
-    const saved = localStorage.getItem(INDICES_STORAGE_KEY);
-    if (saved) {
-        try {
-            const data = JSON.parse(saved);
-            const ipcDisplay = document.getElementById('ipcActualDisplay');
-            const iclDisplay = document.getElementById('iclActualDisplay');
-            
-            if (ipcDisplay && data.ipc) {
-                ipcDisplay.textContent = `${data.ipc.mensual}% (${data.ipc.fecha}) - Fuente: MANUAL`;
-            }
-            if (iclDisplay && data.icl) {
-                iclDisplay.textContent = `${data.icl.mensual}% (${data.icl.fecha}) - Fuente: MANUAL`;
-            }
-            return data;
-        } catch (e) {
-            console.error('Error parsing saved indices:', e);
-        }
-    }
-    
-    return null;
-}
-
-// Sincronizar con API (cargar valores actuales y sobrescribir formulario)
+// Sincronizar con API usando el sistema central
 async function sincronizarConAPI() {
     const statusEl = document.getElementById('indicesStatus');
     if (statusEl) {
@@ -264,38 +222,40 @@ async function sincronizarConAPI() {
     }
     
     try {
-        const token = localStorage.getItem('authToken');
-        if (!token) throw new Error('No autenticado');
+        let success = false;
         
-        const response = await fetch('/.netlify/functions/indices', {
-            headers: { 'Authorization': token }
-        });
+        if (window.sincronizarConAPI) {
+            success = await window.sincronizarConAPI();
+        } else {
+            // Fallback: llamar directamente a la API
+            const token = localStorage.getItem('authToken');
+            if (!token) throw new Error('No autenticado');
+            
+            const response = await fetch('/.netlify/functions/indices', {
+                headers: { 'Authorization': token }
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                if (window.guardarIndices && data.ipc && data.icl) {
+                    window.guardarIndices(data.ipc.monthly, data.icl.monthly, data.ipc.date, data.icl.date);
+                    success = true;
+                }
+            }
+        }
         
-        if (response.ok) {
-            const data = await response.json();
-            
-            const ipcInput = document.getElementById('ipcMensual');
-            const ipcFechaInput = document.getElementById('ipcFecha');
-            const iclInput = document.getElementById('iclMensual');
-            const iclFechaInput = document.getElementById('iclFecha');
-            
-            if (ipcInput && data.ipc) ipcInput.value = data.ipc.monthly;
-            if (ipcFechaInput && data.ipc) ipcFechaInput.value = data.ipc.date;
-            if (iclInput && data.icl) iclInput.value = data.icl.monthly;
-            if (iclFechaInput && data.icl) iclFechaInput.value = data.icl.date;
-            
+        if (success) {
             if (statusEl) {
                 statusEl.innerHTML = '<span class="text-green-600">✅ Sincronizado con API</span>';
                 setTimeout(() => {
                     if (statusEl) statusEl.innerHTML = '';
                 }, 3000);
             }
-            
             UI.toast('Índices sincronizados correctamente', 'success');
-            await cargarIndicesActuales();
         } else {
-            throw new Error('Error en la respuesta');
+            throw new Error('Error en la sincronización');
         }
+        
     } catch (error) {
         console.error('Error sincronizando:', error);
         if (statusEl) {
@@ -306,6 +266,8 @@ async function sincronizarConAPI() {
         }
         UI.toast('Error al sincronizar con API', 'error');
     }
+    
+    await cargarIndicesActuales();
 }
 
 // Inicializar panel de índices
@@ -314,14 +276,21 @@ function initIndicesPanel() {
     const sincronizarBtn = document.getElementById('sincronizarIndicesBtn');
     
     if (guardarBtn) {
+        // Remover event listeners anteriores para evitar duplicados
+        guardarBtn.removeEventListener('click', guardarIndicesManuales);
         guardarBtn.addEventListener('click', guardarIndicesManuales);
     }
     
     if (sincronizarBtn) {
+        sincronizarBtn.removeEventListener('click', sincronizarConAPI);
         sincronizarBtn.addEventListener('click', sincronizarConAPI);
     }
     
+    // Escuchar cambios en los índices desde otros componentes
+    window.addEventListener('indicesActualizados', () => {
+        cargarIndicesActuales();
+    });
+    
     // Cargar valores guardados
-    cargarIndicesGuardados();
     cargarIndicesActuales();
 }

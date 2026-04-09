@@ -218,3 +218,22 @@ window.UI = {
     formatDate,
     debounce
 };
+
+// Mejorar tablas para móviles
+function mejorarTablasMoviles() {
+    if (window.innerWidth <= 768) {
+        document.querySelectorAll('table').forEach(table => {
+            // Agregar data-label a cada celda para mostrar encabezado
+            table.querySelectorAll('thead th').forEach((th, idx) => {
+                const label = th.textContent;
+                table.querySelectorAll(`tbody tr td:nth-child(${idx + 1})`).forEach(td => {
+                    td.setAttribute('data-label', label);
+                });
+            });
+        });
+    }
+}
+
+// Ejecutar al cargar y al redimensionar
+window.addEventListener('resize', mejorarTablasMoviles);
+document.addEventListener('DOMContentLoaded', mejorarTablasMoviles);

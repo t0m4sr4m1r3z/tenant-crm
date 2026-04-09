@@ -2,6 +2,7 @@
 // API Client
 const API = {
     baseUrl: '/.netlify/functions',
+
     
     async request(endpoint, options = {}) {
         const token = localStorage.getItem('authToken');
@@ -567,50 +568,46 @@ async function guardarContrato() {
 // ============================================
 
 async function cargarIndices() {
-    // Primero verificar si hay valores manuales guardados
-    const savedIndices = localStorage.getItem('tenant_crm_indices');
+    // Intentar usar el sistema central de índices
+    if (window.getIndices) {
+        const indices = window.getIndices();
+        cachedIndices = {
+            ipc: { monthly: indices.ipc, yearly: 0, date: indices.ipcFecha || '2026-03' },
+            icl: { monthly: indices.icl, date: indices.iclFecha || '2026-03' },
+            updatedAt: new Date().toISOString()
+        };
+        lastIndicesUpdate = new Date();
+        console.log('📊 Índices cargados desde sistema central:', cachedIndices);
+        return cachedIndices;
+    }
     
+    // Fallback: verificar valores manuales en localStorage
+    const savedIndices = localStorage.getItem('indices_globales');
     if (savedIndices) {
         try {
             const manual = JSON.parse(savedIndices);
-            console.log('📊 Usando valores manuales:', manual);
-            
-            // Usar valores manuales
             cachedIndices = {
-                ipc: { monthly: manual.ipc.mensual, yearly: 0, date: manual.ipc.fecha },
-                icl: { monthly: manual.icl.mensual, date: manual.icl.fecha },
-                updatedAt: manual.actualizado
+                ipc: { monthly: manual.ipc?.mensual || 2.0, yearly: 0, date: manual.ipc?.fecha || '2026-03' },
+                icl: { monthly: manual.icl?.mensual || 2.1, date: manual.icl?.fecha || '2026-03' },
+                updatedAt: manual.actualizado || new Date().toISOString()
             };
+            lastIndicesUpdate = new Date();
+            console.log('📊 Índices cargados desde localStorage:', cachedIndices);
             return cachedIndices;
         } catch (e) {
             console.error('Error parsing saved indices:', e);
         }
     }
     
-    // Si no hay valores manuales, intentar con API
-    try {
-        const token = localStorage.getItem('authToken');
-        const response = await fetch('/.netlify/functions/indices', {
-            headers: { 'Authorization': token }
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            cachedIndices = data;
-            lastIndicesUpdate = new Date();
-            console.log('📊 Índices actualizados desde API:', cachedIndices);
-            return cachedIndices;
-        }
-    } catch (error) {
-        console.error('Error cargando índices:', error);
-    }
-    
     // Valores por defecto
-    return {
-        ipc: { monthly: 2.0, yearly: 15.2, value: 100 },
-        icl: { monthly: 2.1, value: 100 },
+    cachedIndices = {
+        ipc: { monthly: 2.0, yearly: 15.2, value: 100, date: '2026-03' },
+        icl: { monthly: 2.1, value: 100, date: '2026-03' },
         updatedAt: new Date().toISOString()
     };
+    lastIndicesUpdate = new Date();
+    console.log('📊 Usando valores por defecto:', cachedIndices);
+    return cachedIndices;
 }
 
 function calcularMesesDesdeUltimoAumento(contract) {
@@ -1027,22 +1024,93 @@ function descargarPDF() {
 }
 
 function enviarReciboEmail() {
-    if (!currentReceiptData) return;
-    UI.confirm({
-        title: 'Enviar Recibo',
-        message: `¿Enviar recibo a ${currentReceiptData.contract.tenant_email || 'el inquilino'}?`,
-        type: 'info',
-        confirmText: 'Enviar',
-        onConfirm: async () => {
-            UI.toast('Enviando recibo por email...', 'info');
-            setTimeout(() => {
-                UI.toast('Recibo enviado correctamente', 'success');
-                cerrarRecibo();
-            }, 1500);
-        }
-    });
+    if (!currentReceiptData) {
+        UI.toast('No hay datos de recibo para enviar', 'error');
+        return;
+    }
+    
+    const contract = currentReceiptData.contract;
+    const calculation = currentReceiptData.calculation;
+    
+    const tenantEmail = contract.tenant_email;
+    
+    if (!tenantEmail) {
+        UI.toast('El inquilino no tiene email registrado', 'warning');
+        return;
+    }
+    
+    // Generar el contenido del email
+    const subject = `Actualización de Contrato - Nuevo Monto de Alquiler - Contrato #${contract.id}`;
+    const body = generarTextoAumento(contract, calculation);
+    
+    // Codificar para URL
+    const encodedSubject = encodeURIComponent(subject);
+    const encodedBody = encodeURIComponent(body);
+    
+    // Detectar si es dispositivo móvil
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    let mailtoLink;
+    
+    if (isMobile) {
+        // En móvil: usar intent de Gmail app
+        mailtoLink = `intent://mailto:${tenantEmail}?subject=${encodedSubject}&body=${encodedBody}#Intent;scheme=mailto;package=com.google.android.gm;end`;
+    } else {
+        // En computadora: usar Gmail web
+        mailtoLink = `https://mail.google.com/mail/?view=cm&fs=1&to=${tenantEmail}&su=${encodedSubject}&body=${encodedBody}`;
+    }
+    
+    // Abrir el enlace
+    window.open(mailtoLink, '_blank');
+    
+    UI.toast('Abriendo Gmail para enviar el recibo al inquilino...', 'info');
 }
 
+function generarTextoAumento(contract, calculation) {
+    const fecha = new Date().toLocaleDateString('es-ES', {
+        year: 'numeric', month: 'long', day: 'numeric'
+    });
+    const fechaVencimiento = new Date();
+    fechaVencimiento.setDate(fechaVencimiento.getDate() + 15);
+    
+    let text = `========================================\n`;
+    text = `📄 NOTIFICACIÓN DE ACTUALIZACIÓN DE CONTRATO\n`;
+    text += `========================================\n\n`;
+    text += `👤 INQUILINO: ${contract.tenant_name || 'N/A'}\n`;
+    text += `📅 FECHA: ${fecha}\n\n`;
+    text += `========================================\n`;
+    text += `📊 DETALLE DEL AUMENTO\n`;
+    text += `========================================\n\n`;
+    text += `🏠 PROPIEDAD: ${contract.property_address || 'No especificada'}\n`;
+    text += `👤 PROPIETARIO: ${contract.owner || 'N/A'}\n`;
+    text += `💰 MONTO ACTUAL: $${Number(calculation.baseAmount || 0).toLocaleString()}\n`;
+    text += `📈 PORCENTAJE DE AUMENTO: +${calculation.increasePercentage}%\n`;
+    text += `💵 NUEVO MONTO: $${Number(calculation.newAmount || 0).toLocaleString()}\n`;
+    if (calculation.commission) {
+        text += `💸 COMISIÓN (${contract.agent_commission}%): $${Number(calculation.commission || 0).toLocaleString()}\n`;
+    }
+    text += `💰 TOTAL A PAGAR: $${Number(calculation.totalWithCommission || calculation.newAmount || 0).toLocaleString()}\n\n`;
+    text += `========================================\n`;
+    text += `📅 FECHAS IMPORTANTES\n`;
+    text += `========================================\n`;
+    text += `📆 FECHA DE VENCIMIENTO: ${fechaVencimiento.toLocaleDateString()}\n`;
+    text += `📈 PRÓXIMO AUMENTO PROGRAMADO: ${calculation.nextIncreaseDate || 'No programado'}\n\n`;
+    text += `========================================\n`;
+    text += `📝 DESCRIPCIÓN\n`;
+    text += `========================================\n`;
+    text += `${calculation.increaseDescription}\n\n`;
+    text += `========================================\n`;
+    text += `📧 Este es un comprobante válido de actualización de contrato.\n`;
+    text += `========================================\n`;
+    
+    return text;
+}
+
+// Escuchar cambios en los índices
+window.addEventListener('indicesActualizados', () => {
+    console.log('🔄 Índices actualizados, recargando...');
+    cargarIndices();
+});
 // ============================================
 // FUNCIONES GLOBALES
 // ============================================

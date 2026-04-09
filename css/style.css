@@ -345,3 +345,187 @@ input.valid, .dark input.valid {
 .dark .badge-warning { background-color: rgba(245, 158, 11, 0.2); color: #fbbf24; }
 .dark .badge-danger { background-color: rgba(239, 68, 68, 0.2); color: #f87171; }
 .dark .badge-info { background-color: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+
+/* ============================================
+   OPTIMIZACIÓN PARA MÓVILES (AGREGAR AL FINAL)
+   ============================================ */
+
+/* Variables para tamaños móviles */
+:root {
+    --mobile-padding: 1rem;
+    --mobile-card-padding: 1rem;
+    --mobile-font-size: 14px;
+}
+
+/* Ajustes generales para móviles */
+@media (max-width: 768px) {
+    /* Reducir padding general */
+    .p-4 {
+        padding: 0.75rem !important;
+    }
+    
+    /* Tarjetas más compactas */
+    .rounded-xl {
+        border-radius: 0.75rem !important;
+    }
+    
+    /* Fuentes más pequeñas */
+    body {
+        font-size: 14px;
+    }
+    
+    /* Botones más táctiles */
+    button, 
+    .btn,
+    [role="button"] {
+        min-height: 44px;
+        padding: 0.75rem 1rem !important;
+    }
+    
+    /* Tablas con scroll suave */
+    .overflow-x-auto {
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    /* Modales ocupan toda la pantalla en móvil */
+    .fixed.inset-0 .relative.bg-white {
+        max-width: 95% !important;
+        margin: 0 auto !important;
+    }
+}
+
+/* Optimización para pantallas muy pequeñas (menos de 480px) */
+@media (max-width: 480px) {
+    /* Grids a una columna */
+    .grid-cols-2,
+    .grid-cols-3,
+    .grid-cols-4,
+    .lg\:grid-cols-4,
+    .md\:grid-cols-2 {
+        grid-template-columns: 1fr !important;
+    }
+    
+    /* Sidebar ocupa toda la pantalla */
+    .absolute.left-0 {
+        width: 85% !important;
+    }
+    
+    /* Header más compacto */
+    .h-16 {
+        height: 3.5rem !important;
+    }
+    
+    /* Textos más pequeños */
+    .text-2xl {
+        font-size: 1.25rem !important;
+    }
+    
+    .text-3xl {
+        font-size: 1.5rem !important;
+    }
+    
+    /* Espaciado reducido */
+    .gap-4 {
+        gap: 0.75rem !important;
+    }
+    
+    .mb-6 {
+        margin-bottom: 1rem !important;
+    }
+}
+
+/* Mejoras táctiles para dispositivos touch */
+@media (hover: none) and (pointer: coarse) {
+    /* Aumentar área de click en enlaces y botones */
+    a, 
+    button,
+    .clickable {
+        min-height: 44px;
+        min-width: 44px;
+    }
+    
+    /* Feedback táctil */
+    button:active,
+    .clickable:active {
+        transform: scale(0.98);
+        transition: transform 0.05s;
+    }
+    
+    /* Scroll suave */
+    * {
+        -webkit-overflow-scrolling: touch;
+    }
+}
+
+/* Optimización para el modal de propiedades en móvil */
+@media (max-width: 768px) {
+    #propertiesModal .max-w-6xl {
+        max-width: 95% !important;
+        margin: 0 auto !important;
+    }
+    
+    #propertiesModal table {
+        font-size: 12px;
+    }
+    
+    #propertiesModal th,
+    #propertiesModal td {
+        padding: 0.5rem 0.25rem !important;
+    }
+}
+
+/* Optimización para formularios en móvil (evita zoom en iOS) */
+@media (max-width: 768px) {
+    input, select, textarea {
+        font-size: 16px !important;
+    }
+    
+    /* Modales de formulario ocupan toda la pantalla */
+    #contractModal .max-w-3xl,
+    #ownerModal .max-w-md,
+    #paymentModal .max-w-md {
+        max-width: 95% !important;
+        margin: 0 auto !important;
+    }
+}
+
+/* Botón flotante de instalación PWA en móvil */
+@media (max-width: 768px) {
+    #installPwaBtn {
+        bottom: 1rem;
+        right: 1rem;
+        padding: 0.75rem 1rem;
+        font-size: 0.875rem;
+    }
+}
+
+/* Notificaciones en móvil */
+@media (max-width: 768px) {
+    .notifications-panel {
+        width: 90% !important;
+        right: 5% !important;
+        left: 5% !important;
+        top: 4rem !important;
+    }
+}
+
+/* Toast notifications en móvil */
+@media (max-width: 768px) {
+    .toast-notification {
+        max-width: 90% !important;
+        min-width: auto !important;
+        right: 5% !important;
+        left: 5% !important;
+        top: auto !important;
+        bottom: 1rem !important;
+    }
+}
+
+/* Ajuste para la tabla de propietarios en móvil */
+@media (max-width: 640px) {
+    #ownersTableBody td:nth-child(4),
+    #ownersTableBody td:nth-child(5) {
+        display: flex;
+        justify-content: space-between;
+    }
+}

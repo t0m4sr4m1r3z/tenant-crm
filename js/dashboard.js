@@ -667,6 +667,38 @@ async function actualizarIndices() {
     }
 }
 
+// ============================================
+// ÍNDICES ECONÓMICOS EN DASHBOARD
+// ============================================
+
+async function actualizarIndices() {
+    const indices = getIndices();
+    
+    const ipcValue = document.getElementById('ipcValue');
+    const iclValue = document.getElementById('iclValue');
+    const ipcDate = document.getElementById('ipcDate');
+    const iclDate = document.getElementById('iclDate');
+    const indicesUpdateTime = document.getElementById('indicesUpdateTime');
+    
+    if (ipcValue) ipcValue.textContent = `${indices.ipc}%`;
+    if (iclValue) iclValue.textContent = `${indices.icl}%`;
+    if (ipcDate) ipcDate.textContent = `Actualizado: ${indices.ipcFecha}`;
+    if (iclDate) iclDate.textContent = `Actualizado: ${indices.iclFecha}`;
+    if (indicesUpdateTime) {
+        indicesUpdateTime.textContent = `Última actualización: ${new Date(window.INDICES_CONFIG?.ultimaActualizacion).toLocaleTimeString()}`;
+    }
+    
+    console.log('📊 Dashboard actualizado con índices:', indices);
+}
+
+// Escuchar cambios en los índices
+window.addEventListener('indicesActualizados', () => {
+    actualizarIndices();
+});
+
+// Modificar la función existente actualizarIndices del dashboard
+// Si ya existe, reemplázala o asegúrate de que llame a getIndices()
+
 // Llamar al cargar el dashboard
 document.addEventListener('DOMContentLoaded', () => {
     // ... código existente ...
