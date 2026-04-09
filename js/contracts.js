@@ -511,6 +511,14 @@ function abrirModalEditarContratoInterno(contractId) {
     document.getElementById('contractStatus').value = contract.status || 'active';
     
     modal.classList.remove('hidden');
+    
+    // Limpiar archivos anteriores ANTES de cargar los nuevos
+    currentContractFiles = [];
+    mostrarArchivos([]);
+    
+    // Cargar archivos del contrato
+    cargarArchivosContrato(contractId);
+    initFileUpload(contractId);
 }
 
 async function guardarContrato() {
@@ -1140,5 +1148,158 @@ window.cerrarRecibo = cerrarRecibo;
 window.imprimirRecibo = imprimirRecibo;
 window.descargarPDF = descargarPDF;
 window.enviarReciboEmail = enviarReciboEmail;
+
+// ============================================
+// GESTIÓN DE ARCHIVOS DE CONTRATOS
+// ============================================
+
+let currentContractFiles = [];
+let cloudinaryCloudName = 'TU_CLOUD_NAME'; // Reemplaza con tu cloud_name
+
+// Subir archivo a Cloudinary
+async function subirArchivoCloudinary(file, contractId) {
+    return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('upload_preset', 'tenant_crm');
+        formData.append('folder', `contratos/${contractId}`);
+        
+        fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/upload`, {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.secure_url) {
+                // Guardar referencia en la base de datos
+                return fetch('/.netlify/functions/upload-file', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': localStorage.getItem('authToken')
+                    },
+                    body: JSON.stringify({
+                        contract_id: contractId,
+                        file_url: data.secure_url,
+                        file_name: file.name,
+                        file_type: file.type,
+                        file_size: file.size
+                    })
+                });
+            }
+            throw new Error('Error al subir a Cloudinary');
+        })
+        .then(response => response.json())
+        .then(data => resolve(data))
+        .catch(err => reject(err));
+    });
+}
+
+// Cargar archivos de un contrato
+async function cargarArchivosContrato(contractId) {
+    try {
+        const token = localStorage.getItem('authToken');
+        const response = await fetch(`/.netlify/functions/upload-file?contract_id=${contractId}`, {
+            headers: { 'Authorization': token }
+        });
+        const files = await response.json();
+        currentContractFiles = files;
+        mostrarArchivos(files);
+    } catch (error) {
+        console.error('Error cargando archivos:', error);
+    }
+}
+
+// Mostrar archivos en el modal
+function mostrarArchivos(archivos) {
+    const container = document.getElementById('fileList');
+    const noFilesMsg = document.getElementById('noFilesMsg');
+    
+    if (!container) return;
+    
+    if (!archivos || archivos.length === 0) {
+        if (noFilesMsg) noFilesMsg.classList.remove('hidden');
+        container.innerHTML = `
+            <div class="text-center text-gray-400 col-span-full py-4" id="noFilesMsg">
+                <i class="fas fa-file-alt text-3xl mb-2 opacity-50"></i>
+                <p class="text-sm">No hay documentos adjuntos</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = archivos.map(file => `
+        <div class="border rounded-lg p-2 relative group bg-white">
+            ${file.file_type && file.file_type.includes('image') ? 
+                `<img src="${file.file_url}" class="h-20 w-full object-cover rounded" alt="${escapeHtml(file.file_name)}">` :
+                `<div class="h-20 bg-gray-100 rounded flex flex-col items-center justify-center">
+                    <i class="fas ${file.file_name?.toLowerCase().includes('.pdf') ? 'fa-file-pdf text-red-500' : 'fa-file-alt text-blue-500'} text-3xl"></i>
+                    <span class="text-xs mt-1 truncate w-full px-1">${escapeHtml(file.file_name?.substring(0, 15) || 'Archivo')}</span>
+                 </div>`
+            }
+            <button onclick="eliminarArchivo(${file.id})" 
+                    class="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    `).join('');
+}
+
+// Eliminar archivo
+async function eliminarArchivo(fileId) {
+    if (!confirm('¿Eliminar este documento?')) return;
+    
+    try {
+        const token = localStorage.getItem('authToken');
+        await fetch('/.netlify/functions/upload-file', {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': token
+            },
+            body: JSON.stringify({ file_id: fileId })
+        });
+        
+        UI.toast('Documento eliminado', 'success');
+        if (currentReceiptData?.contract?.id) {
+            await cargarArchivosContrato(currentReceiptData.contract.id);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        UI.toast('Error al eliminar', 'error');
+    }
+}
+
+// Inicializar upload de archivos
+function initFileUpload(contractId) {
+    const uploadBtn = document.getElementById('uploadFileBtn');
+    const fileInput = document.getElementById('fileInput');
+    
+    if (!uploadBtn || !fileInput) return;
+    
+    uploadBtn.addEventListener('click', () => {
+        fileInput.click();
+    });
+    
+    fileInput.addEventListener('change', async (e) => {
+        const files = Array.from(e.target.files);
+        
+        if (files.length === 0) return;
+        
+        UI.toast(`Subiendo ${files.length} archivo(s)...`, 'info');
+        
+        for (const file of files) {
+            try {
+                await subirArchivoCloudinary(file, contractId);
+                UI.toast(`${file.name} subido`, 'success');
+            } catch (error) {
+                UI.toast(`Error al subir ${file.name}`, 'error');
+            }
+        }
+        
+        fileInput.value = '';
+        await cargarArchivosContrato(contractId);
+    });
+}
 
 console.log('✅ Funciones de contratos configuradas correctamente');
