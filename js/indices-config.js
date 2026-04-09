@@ -15,25 +15,29 @@ const INDICES_CONFIG = {
     ultimaActualizacion: new Date().toISOString()
 };
 
-// Cargar índices guardados
+// Cargar índices guardados de localStorage
 function cargarIndicesGuardados() {
     const saved = localStorage.getItem('indices_globales');
+    console.log('📦 Cargando índices guardados:', saved);
+    
     if (saved) {
         try {
             const data = JSON.parse(saved);
-            INDICES_CONFIG.ipc.mensual = data.ipc?.mensual || INDICES_CONFIG.ipc.mensual;
-            INDICES_CONFIG.ipc.fecha = data.ipc?.fecha || INDICES_CONFIG.ipc.fecha;
-            INDICES_CONFIG.icl.mensual = data.icl?.mensual || INDICES_CONFIG.icl.mensual;
-            INDICES_CONFIG.icl.fecha = data.icl?.fecha || INDICES_CONFIG.icl.fecha;
-            INDICES_CONFIG.ultimaActualizacion = data.actualizado || new Date().toISOString();
-            console.log('📊 Índices cargados desde localStorage:', INDICES_CONFIG);
+            INDICES_CONFIG.ipc.mensual = data.ipc?.mensual ?? INDICES_CONFIG.ipc.mensual;
+            INDICES_CONFIG.ipc.fecha = data.ipc?.fecha ?? INDICES_CONFIG.ipc.fecha;
+            INDICES_CONFIG.icl.mensual = data.icl?.mensual ?? INDICES_CONFIG.icl.mensual;
+            INDICES_CONFIG.icl.fecha = data.icl?.fecha ?? INDICES_CONFIG.icl.fecha;
+            INDICES_CONFIG.ultimaActualizacion = data.actualizado ?? new Date().toISOString();
+            console.log('✅ Índices cargados desde localStorage:', INDICES_CONFIG);
+            return true;
         } catch (e) {
-            console.error('Error cargando índices:', e);
+            console.error('Error parsing saved indices:', e);
         }
     }
+    return false;
 }
 
-// Guardar índices
+// Guardar índices manuales
 function guardarIndices(ipc, icl, ipcFecha, iclFecha) {
     INDICES_CONFIG.ipc.mensual = ipc;
     INDICES_CONFIG.icl.mensual = icl;
@@ -48,11 +52,10 @@ function guardarIndices(ipc, icl, ipcFecha, iclFecha) {
     };
     
     localStorage.setItem('indices_globales', JSON.stringify(data));
+    console.log('✅ Índices guardados en localStorage:', data);
     
     // Disparar evento para actualizar otros componentes
     window.dispatchEvent(new CustomEvent('indicesActualizados', { detail: INDICES_CONFIG }));
-    
-    console.log('✅ Índices guardados:', INDICES_CONFIG);
 }
 
 // Obtener índices actuales
@@ -104,7 +107,7 @@ async function sincronizarConAPI() {
     return false;
 }
 
-// Inicializar
+// Inicializar - CARGAR ÍNDICES PRIMERO
 cargarIndicesGuardados();
 
 // Exportar para uso global
