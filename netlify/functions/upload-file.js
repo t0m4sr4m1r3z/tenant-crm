@@ -26,15 +26,19 @@ exports.handler = async (event, context) => {
 
         // GET - Obtener archivos de un contrato
         if (event.httpMethod === 'GET') {
+            const contract_id = event.queryStringParameters.contract_id;
+            
             const files = await sql`
                 SELECT * FROM contract_files 
                 WHERE contract_id = ${contract_id}
                 ORDER BY uploaded_at DESC
             `;
+            
+            // Siempre devolver un array, aunque esté vacío
             return {
                 statusCode: 200,
                 headers,
-                body: JSON.stringify(files)
+                body: JSON.stringify(files || [])
             };
         }
 

@@ -1202,23 +1202,42 @@ async function cargarArchivosContrato(contractId) {
         const response = await fetch(`/.netlify/functions/upload-file?contract_id=${contractId}`, {
             headers: { 'Authorization': token }
         });
-        const files = await response.json();
-        currentContractFiles = files;
-        mostrarArchivos(files);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Asegurarse de que data sea un array
+        if (Array.isArray(data)) {
+            currentContractFiles = data;
+            mostrarArchivos(data);
+        } else {
+            console.warn('La respuesta no es un array:', data);
+            currentContractFiles = [];
+            mostrarArchivos([]);
+        }
+        
     } catch (error) {
         console.error('Error cargando archivos:', error);
+        currentContractFiles = [];
+        mostrarArchivos([]);
     }
 }
 
 // Mostrar archivos en el modal
 function mostrarArchivos(archivos) {
     const container = document.getElementById('fileList');
-    const noFilesMsg = document.getElementById('noFilesMsg');
-    
     if (!container) return;
     
-    if (!archivos || archivos.length === 0) {
-        if (noFilesMsg) noFilesMsg.classList.remove('hidden');
+    // Asegurarse de que archivos sea un array
+    if (!Array.isArray(archivos)) {
+        console.warn('archivos no es un array:', archivos);
+        archivos = [];
+    }
+    
+    if (archivos.length === 0) {
         container.innerHTML = `
             <div class="text-center text-gray-400 col-span-full py-4" id="noFilesMsg">
                 <i class="fas fa-file-alt text-3xl mb-2 opacity-50"></i>
