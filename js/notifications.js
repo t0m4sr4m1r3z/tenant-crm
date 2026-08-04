@@ -1,11 +1,9 @@
-// notifications.js - Sistema de notificaciones
+// notifications.js - Sistema de notificaciones – CORREGIDO
 const Notifications = {
-    // Elementos del DOM
     btn: document.getElementById('notificationsBtn'),
     panel: null,
     badge: null,
     
-    // Estado
     isOpen: false,
     notifications: [],
     unreadCount: 0,
@@ -14,10 +12,8 @@ const Notifications = {
         this.btn = document.getElementById('notificationsBtn');
         if (!this.btn) return;
         
-        // Crear el panel de notificaciones
         this.createPanel();
         
-        // Crear el badge si no existe
         this.badge = this.btn.querySelector('.notification-badge');
         if (!this.badge) {
             this.badge = document.createElement('span');
@@ -25,23 +21,18 @@ const Notifications = {
             this.btn.appendChild(this.badge);
         }
         
-        // Event listeners
         this.btn.addEventListener('click', (e) => {
             e.stopPropagation();
             this.toggle();
         });
         
-        // Cerrar al hacer clic fuera
         document.addEventListener('click', (e) => {
             if (this.isOpen && !this.panel.contains(e.target) && e.target !== this.btn) {
                 this.close();
             }
         });
         
-        // Cargar notificaciones iniciales
         this.loadNotifications();
-        
-        // Actualizar cada 30 segundos
         setInterval(() => this.loadNotifications(), 30000);
     },
     
@@ -66,10 +57,8 @@ const Notifications = {
                 <a href="#" class="text-blue-600 hover:text-blue-800">Ver todas</a>
             </div>
         `;
-        
         document.body.appendChild(this.panel);
         
-        // Evento para marcar todas como leídas
         this.panel.querySelector('.mark-all-read').addEventListener('click', (e) => {
             e.preventDefault();
             this.markAllAsRead();
@@ -78,19 +67,17 @@ const Notifications = {
     
     async loadNotifications() {
         try {
-            const token = localStorage.getItem('authToken');
+            const token = sessionStorage.getItem('authToken');
             
-            // Cargar datos necesarios para generar notificaciones
             const [contracts, payments] = await Promise.all([
                 fetch('/.netlify/functions/contracts', {
                     headers: { 'Authorization': token }
-                }).then(r => r.json()),
+                }).then(r => r.ok ? r.json() : []),
                 fetch('/.netlify/functions/payments', {
                     headers: { 'Authorization': token }
-                }).then(r => r.json())
+                }).then(r => r.ok ? r.json() : [])
             ]);
             
-            // Generar notificaciones basadas en los datos
             this.generateNotifications(contracts || [], payments || []);
             
         } catch (error) {
@@ -102,7 +89,6 @@ const Notifications = {
         const notifications = [];
         const today = new Date();
         
-        // 1. Pagos vencidos
         payments.filter(p => p.status === 'pending').forEach(p => {
             const dueDate = new Date(p.due_date);
             if (dueDate < today) {
@@ -120,7 +106,6 @@ const Notifications = {
             }
         });
         
-        // 2. Próximos pagos (7 días)
         payments.filter(p => p.status === 'pending').forEach(p => {
             const dueDate = new Date(p.due_date);
             const daysUntil = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
@@ -138,7 +123,6 @@ const Notifications = {
             }
         });
         
-        // 3. Contratos por vencer (30 días)
         contracts.filter(c => c.status === 'active').forEach(c => {
             if (c.end_date) {
                 const endDate = new Date(c.end_date);
@@ -158,7 +142,6 @@ const Notifications = {
             }
         });
         
-        // 4. Próximos aumentos (15 días)
         contracts.filter(c => c.next_increase_date).forEach(c => {
             const increaseDate = new Date(c.next_increase_date);
             const daysUntil = Math.ceil((increaseDate - today) / (1000 * 60 * 60 * 24));
@@ -176,7 +159,6 @@ const Notifications = {
             }
         });
         
-        // Ordenar por fecha (más reciente primero)
         notifications.sort((a, b) => a.time - b.time);
         
         this.notifications = notifications;
@@ -184,7 +166,6 @@ const Notifications = {
         this.updateBadge();
         this.renderNotifications();
         
-        // Actualizar hora en el footer
         const footer = this.panel.querySelector('.border-t span');
         if (footer) {
             footer.textContent = `Actualizado ${new Date().toLocaleTimeString()}`;
@@ -238,7 +219,6 @@ const Notifications = {
             `;
         }).join('');
         
-        // Agregar evento click a cada notificación
         list.querySelectorAll('.notification-item').forEach(item => {
             item.addEventListener('click', () => {
                 const link = item.dataset.link;
@@ -269,8 +249,6 @@ const Notifications = {
     open() {
         this.panel.classList.remove('hidden');
         this.isOpen = true;
-        
-        // Pequeña animación
         this.panel.style.transform = 'translateY(-10px)';
         this.panel.style.opacity = '0';
         setTimeout(() => {
@@ -293,8 +271,6 @@ const Notifications = {
         this.unreadCount = 0;
         this.updateBadge();
         this.renderNotifications();
-        
-        // Mostrar mensaje
         if (window.UI) {
             UI.toast('Todas las notificaciones marcadas como leídas', 'success');
         }
@@ -315,7 +291,6 @@ const Notifications = {
     }
 };
 
-// Inicializar cuando el DOM esté listo
 document.addEventListener('DOMContentLoaded', () => {
     Notifications.init();
 });

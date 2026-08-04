@@ -1,33 +1,46 @@
+// owners.js - Gestión de Propietarios (Versión con permisos) – CORREGIDO
 const API = {
     baseUrl: '/.netlify/functions',
     
     async request(endpoint, options = {}) {
-        const token = localStorage.getItem('authToken');
-        
-        // Agregar timestamp para evitar caché en GET
+        const token = sessionStorage.getItem('authToken');
+
+        const isGet = !options.method || options.method === 'GET';
+        if (isGet) {
+            const cached = window.APICache ? window.APICache.get(endpoint, options) : null;
+            if (cached) {
+                return cached;
+            }
+        }
+
         let url = `${this.baseUrl}${endpoint}`;
         if (!options.method || options.method === 'GET') {
             const separator = url.includes('?') ? '&' : '?';
             url = `${url}${separator}_t=${Date.now()}`;
         }
-        
+
         const headers = {
             'Content-Type': 'application/json',
             ...(token && { 'Authorization': token }),
             ...options.headers
         };
-        
+
         try {
             const response = await fetch(url, { ...options, headers });
             
             if (response.status === 401) {
-                localStorage.removeItem('authToken');
+                sessionStorage.removeItem('authToken');
                 window.location.href = '/login.html';
                 throw new Error('Sesión expirada');
             }
             
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Error');
+
+            if (isGet && window.APICache) {
+                window.APICache.set(endpoint, data, options);
+            }
+
             return data;
         } catch (error) {
             console.error('API Error:', error);
@@ -41,6 +54,16 @@ const API = {
     
     async getOwnerProperties(ownerId) {
         return this.request(`/owners?id=${ownerId}&properties=true`);
+    },
+
+    // Si el endpoint no existe, usamos fallback
+    async getPropertiesByOwner(ownerId) {
+        try {
+            return await this.request(`/properties?owner_id=${ownerId}`);
+        } catch (e) {
+            console.warn('getPropertiesByOwner fallback:', e);
+            return { properties: [] };
+        }
     },
     
     async createOwner(owner) {
@@ -57,33 +80,54 @@ const API = {
 };
 
 let currentOwners = [];
+let currentPropertiesData = null;
+let currentOwnerName = '';
+let currentPage = 1;
+const PAGE_SIZE = 10;
+let filteredOwners = [];
 
 document.addEventListener('DOMContentLoaded', async () => {
-    const token = localStorage.getItem('authToken');
+    const token = sessionStorage.getItem('authToken');
     if (!token) {
         window.location.href = '/login.html';
         return;
     }
     
-    initSidebar();
+    AppSidebar.init();
     initModal();
+    
+    // Crear contenedor de paginación si no existe
+    if (!document.getElementById('ownersPagination')) {
+        const tableContainer = document.querySelector('.bg-white.rounded-xl.shadow-sm.border.border-gray-100.overflow-hidden');
+        if (tableContainer) {
+            const paginationDiv = document.createElement('div');
+            paginationDiv.id = 'ownersPagination';
+            paginationDiv.className = 'flex justify-between items-center px-6 py-3 bg-gray-50 border-t border-gray-200';
+            tableContainer.appendChild(paginationDiv);
+        }
+    }
+    
     await loadOwners();
     
-    document.getElementById('addOwnerBtn').addEventListener('click', () => openOwnerModal());
+    const addBtn = document.getElementById('addOwnerBtn');
+    if (addBtn) {
+        if (!AUTH.hasPermission('canCreate')) {
+            addBtn.style.display = 'none';
+        }
+        addBtn.addEventListener('click', () => openOwnerModal());
+    }
+    
     document.getElementById('closeModalBtn').addEventListener('click', closeModal);
     document.getElementById('ownerForm').addEventListener('submit', saveOwner);
-});
-
-function initSidebar() {
-    const menuBtn = document.getElementById('menuBtn');
-    const sidebar = document.getElementById('sidebar');
-    const closeBtn = document.getElementById('closeSidebarBtn');
-    const overlay = document.getElementById('sidebarOverlay');
     
-    if (menuBtn && sidebar) menuBtn.addEventListener('click', () => sidebar.classList.remove('hidden'));
-    if (closeBtn && sidebar) closeBtn.addEventListener('click', () => sidebar.classList.add('hidden'));
-    if (overlay && sidebar) overlay.addEventListener('click', () => sidebar.classList.add('hidden'));
-}
+    // Búsqueda en propietarios
+    const searchInput = document.getElementById('searchOwners');
+    if (searchInput) {
+        searchInput.addEventListener('input', AppUtils.debounce(function(e) {
+            filtrarPropietarios(e.target.value);
+        }, 300));
+    }
+});
 
 function initModal() {
     const modal = document.getElementById('ownerModal');
@@ -99,11 +143,14 @@ function closePropertiesModal() {
     document.getElementById('propertiesModal').classList.add('hidden');
 }
 
+// ============================================
+// FUNCIONES DE PAGINACIÓN
+// ============================================
+
 async function loadOwners() {
     console.log('🔄 loadOwners ejecutándose...');
     try {
-        // Forzar evitar caché con headers
-        const token = localStorage.getItem('authToken');
+        const token = sessionStorage.getItem('authToken');
         const response = await fetch('/.netlify/functions/owners?_t=' + Date.now(), {
             headers: { 
                 'Authorization': token,
@@ -118,119 +165,261 @@ async function loadOwners() {
         const owners = await response.json();
         console.log('✅ Propietarios cargados:', owners.length);
         currentOwners = owners;
-        renderOwnersTable(currentOwners);
+        filteredOwners = [...currentOwners];
+        currentPage = 1;
+        renderizarOwnersPaginado();
     } catch (error) {
         console.error('Error:', error);
-        document.getElementById('ownersTableBody').innerHTML = '<tr><td colspan="6" class="text-center py-8 text-red-500">Error al cargar</div></td></tr>';
+        document.getElementById('ownersTableBody').innerHTML = '<tr><td colspan="6" class="text-center py-8 text-red-500">Error al cargar</td></tr>';
+        currentOwners = [];
+        filteredOwners = [];
     }
+}
+
+function renderizarOwnersPaginado() {
+    const totalItems = filteredOwners.length;
+    const totalPages = Math.ceil(totalItems / PAGE_SIZE);
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    const pageItems = filteredOwners.slice(start, end);
+    
+    renderOwnersTable(pageItems);
+    renderPaginationOwners(totalItems, totalPages);
 }
 
 function renderOwnersTable(owners) {
     const tbody = document.getElementById('ownersTableBody');
     if (!owners || owners.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-8">No hay propietarios registrados</td></tr>';
+        tbody.innerHTML = `
+            <tr><td colspan="6" class="text-center py-8">No hay propietarios registrados</td></tr>
+        `;
         return;
     }
     
+    const canEdit = AUTH.hasPermission('canEdit');
+    const canDelete = AUTH.hasPermission('canDelete');
+    
     tbody.innerHTML = owners.map(owner => `
         <tr class="hover:bg-gray-50">
-            <td class="px-6 py-4 font-medium">${escapeHtml(owner.name)}</td>
-            <td class="px-6 py-4">${escapeHtml(owner.email || '-')}</td>
-            <td class="px-6 py-4">${escapeHtml(owner.phone || '-')}</td>
+            <td class="px-6 py-4 font-medium">${AppUtils.escapeHtml(owner.name)}</td>
+            <td class="px-6 py-4">${owner.email ? AppUtils.escapeHtml(owner.email) : '-'}</td>
+            <td class="px-6 py-4">${owner.phone ? AppUtils.escapeHtml(owner.phone) : '-'}</td>
             <td class="px-6 py-4 text-center">${owner.total_contracts || 0}</td>
-            <td class="px-6 py-4 font-medium">$${(owner.total_income || 0).toLocaleString()}</td>
+            <td class="px-6 py-4 font-medium">${AppUtils.formatCurrency(owner.total_income || 0)}</td>
             <td class="px-6 py-4">
                 <div class="flex gap-2">
-                    <button onclick="viewProperties(${owner.id})" class="text-indigo-600 hover:text-indigo-800 p-1" title="Ver Propiedades">
+                    <button onclick="viewProperties(${owner.id})" class="text-indigo-600 hover:text-indigo-800 p-1" title="Ver Propiedades" aria-label="Ver propiedades de ${AppUtils.escapeHtml(owner.name)}">
                         <i class="fas fa-building"></i>
                     </button>
-                    <button onclick="editOwner(${owner.id})" class="text-blue-600 hover:text-blue-800 p-1" title="Editar">
-                        <i class="fas fa-edit"></i>
-                    </button>
-                    <button onclick="deleteOwner(${owner.id})" class="text-red-600 hover:text-red-800 p-1" title="Eliminar">
-                        <i class="fas fa-trash"></i>
-                    </button>
+                    ${canEdit ? `<button onclick="editOwner(${owner.id})" class="text-blue-600 hover:text-blue-800 p-1" title="Editar" aria-label="Editar propietario ${AppUtils.escapeHtml(owner.name)}"><i class="fas fa-edit"></i></button>` : ''}
+                    ${canDelete ? `<button onclick="deleteOwner(${owner.id})" class="text-red-600 hover:text-red-800 p-1" title="Eliminar" aria-label="Eliminar propietario ${AppUtils.escapeHtml(owner.name)}"><i class="fas fa-trash"></i></button>` : ''}
                 </div>
             </td>
         </tr>
     `).join('');
 }
 
+function renderPaginationOwners(totalItems, totalPages) {
+    const container = document.getElementById('ownersPagination');
+    if (!container) return;
+    
+    if (totalItems === 0) {
+        container.innerHTML = '';
+        return;
+    }
+    
+    const startItem = (currentPage - 1) * PAGE_SIZE + 1;
+    const endItem = Math.min(currentPage * PAGE_SIZE, totalItems);
+    
+    container.innerHTML = `
+        <div class="flex flex-wrap items-center justify-between gap-3 w-full">
+            <div class="text-sm text-gray-600">
+                Mostrando <span class="font-medium">${startItem}</span> - <span class="font-medium">${endItem}</span> de <span class="font-medium">${totalItems}</span> propietarios
+            </div>
+            <div class="flex items-center gap-2">
+                <button onclick="irPaginaOwners(${currentPage - 1})" 
+                        class="px-3 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 transition ${currentPage === 1 ? 'opacity-50 cursor-not-allowed' : ''}"
+                        ${currentPage === 1 ? 'disabled' : ''}
+                        aria-label="Página anterior">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+                <span class="text-sm font-medium px-3 py-1 bg-blue-100 text-blue-700 rounded-lg">${currentPage} / ${totalPages}</span>
+                <button onclick="irPaginaOwners(${currentPage + 1})" 
+                        class="px-3 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 transition ${currentPage === totalPages ? 'opacity-50 cursor-not-allowed' : ''}"
+                        ${currentPage === totalPages ? 'disabled' : ''}
+                        aria-label="Página siguiente">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function irPaginaOwners(page) {
+    const totalPages = Math.ceil(filteredOwners.length / PAGE_SIZE);
+    if (page < 1 || page > totalPages) return;
+    currentPage = page;
+    renderizarOwnersPaginado();
+}
+
+// ============================================
+// BÚSQUEDA Y FILTROS
+// ============================================
+
+function filtrarPropietarios(searchTerm) {
+    if (!searchTerm.trim()) {
+        filteredOwners = [...currentOwners];
+    } else {
+        const term = searchTerm.toLowerCase().trim();
+        filteredOwners = currentOwners.filter(owner => 
+            owner.name.toLowerCase().includes(term) ||
+            (owner.email && owner.email.toLowerCase().includes(term)) ||
+            (owner.dni && owner.dni.includes(term))
+        );
+    }
+    currentPage = 1;
+    renderizarOwnersPaginado();
+}
+
+// ============================================
+// FUNCIONES DE PROPIEDADES
+// ============================================
+
 async function viewProperties(ownerId) {
     const owner = currentOwners.find(o => o.id === ownerId);
     if (!owner) return;
     
-    document.getElementById('modalOwnerName').textContent = `Propiedades de ${escapeHtml(owner.name)}`;
-    document.getElementById('propertiesList').innerHTML = '<div class="text-center py-8"><i class="fas fa-spinner fa-spin text-2xl"></i><p class="mt-2">Cargando propiedades...</p></div>';
+    document.getElementById('modalOwnerName').textContent = `Propiedades y Contratos de ${AppUtils.escapeHtml(owner.name)}`;
+    document.getElementById('propertiesList').innerHTML = '<div class="text-center py-8"><i class="fas fa-spinner fa-spin text-2xl"></i><p class="mt-2">Cargando datos...</p></div>';
     document.getElementById('propertiesModal').classList.remove('hidden');
     
     try {
-        const properties = await API.getOwnerProperties(ownerId);
-        // Guardar datos incluyendo el email del propietario
-        setPropertiesData(properties, owner.name, owner.email);
-        renderPropertiesList(properties);
+        const [contractsData, propertiesData] = await Promise.all([
+            API.getOwnerProperties(ownerId),
+            API.getPropertiesByOwner(ownerId).catch(() => ({ properties: [] }))
+        ]);
+        
+        const combinedData = {
+            contracts: contractsData.contracts || [],
+            properties: propertiesData.properties || [],
+            total_monthly_income: contractsData.total_monthly_income || 0
+        };
+        
+        setPropertiesData(combinedData, owner.name, owner.email);
+        renderPropertiesList(combinedData);
     } catch (error) {
-        document.getElementById('propertiesList').innerHTML = `<div class="text-center py-8 text-red-500">Error al cargar las propiedades: ${error.message}</div>`;
+        document.getElementById('propertiesList').innerHTML = `<div class="text-center py-8 text-red-500">Error al cargar los datos: ${AppUtils.escapeHtml(error.message)}</div>`;
     }
 }
+
 function renderPropertiesList(data) {
     const container = document.getElementById('propertiesList');
-    const properties = data.contracts || [];
+    const contracts = data.contracts || [];
+    const properties = data.properties || [];
     
-    // Guardar datos para exportación
-    setPropertiesData(data, document.getElementById('modalOwnerName').textContent.replace('Propiedades de ', ''));
+    setPropertiesData(data, document.getElementById('modalOwnerName').textContent.replace('Propiedades y Contratos de ', ''));
     
-    if (properties.length === 0) {
-        container.innerHTML = '<div class="text-center py-8 text-gray-500">No tiene propiedades en alquiler registradas</div>';
-        return;
+    let html = '';
+    
+    // Sección de Propiedades
+    if (properties.length > 0) {
+        html += `
+            <h4 class="font-semibold text-gray-700 mb-3 mt-4">🏢 Propiedades del Propietario</h4>
+            <div class="overflow-x-auto mb-6">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Dirección</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tipo</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Habitaciones</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                        ${properties.map(p => `
+                            <tr>
+                                <td class="px-4 py-2 font-medium">${AppUtils.escapeHtml(p.address)}</td>
+                                <td class="px-4 py-2">${AppUtils.escapeHtml(p.type || 'No especificado')}</td>
+                                <td class="px-4 py-2 text-center">${p.rooms || 0}</td>
+                                <td class="px-4 py-2">
+                                    <span class="badge ${p.status === 'disponible' ? 'badge-success' : p.status === 'alquilado' ? 'badge-info' : 'badge-warning'}">
+                                        ${p.status === 'disponible' ? 'Disponible' : p.status === 'alquilado' ? 'Alquilado' : p.status || 'N/A'}
+                                    </span>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    } else {
+        html += `
+            <div class="text-center py-4 text-gray-500">
+                <i class="fas fa-building text-2xl mb-2 opacity-50"></i>
+                <p>No tiene propiedades registradas</p>
+            </div>
+        `;
     }
     
-    container.innerHTML = `
-        <div class="overflow-x-auto" id="propertiesTableContainer">
-            <table class="min-w-full divide-y divide-gray-200" id="propertiesTable">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Dirección</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Inquilino</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contacto</th>
-                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Renta Mensual</th>
-                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Último Pago</th>
-                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Próximo Aumento</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200">
-                    ${properties.map(prop => `
-                        <tr class="hover:bg-gray-50">
-                            <td class="px-4 py-3 font-medium">${escapeHtml(prop.property_address || 'No especificada')}</td>
-                            <td class="px-4 py-3">${escapeHtml(prop.tenant_name || 'Sin inquilino')}</td>
-                            <td class="px-4 py-3">
-                                ${prop.tenant_email ? `<div class="text-sm">${escapeHtml(prop.tenant_email)}</div>` : ''}
-                                ${prop.tenant_phone ? `<div class="text-xs text-gray-500">${escapeHtml(prop.tenant_phone)}</div>` : ''}
-                            </td>
-                            <td class="px-4 py-3 text-right font-semibold text-green-600">${UI.formatCurrency(prop.base_amount)}</td>
-                            <td class="px-4 py-3 text-center">
-                                ${prop.last_payment_date ? `<span class="text-sm">${UI.formatDate(prop.last_payment_date)}</span>` : '<span class="text-gray-400 text-sm">Sin pagos</span>'}
-                            </td>
-                            <td class="px-4 py-3 text-center">
-                                ${prop.next_increase_date ? `
-                                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getIncreaseClass(prop.next_increase_date)}">
-                                        ${UI.formatDate(prop.next_increase_date)}
-                                    </span>
-                                ` : '<span class="text-gray-400 text-sm">No programado</span>'}
-                            </td>
+    // Sección de Contratos
+    if (contracts.length > 0) {
+        html += `
+            <h4 class="font-semibold text-gray-700 mb-3 mt-6">📄 Contratos Activos</h4>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200" id="propertiesTable">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Dirección</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Inquilino</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contacto</th>
+                            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Renta Mensual</th>
+                            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Último Pago</th>
+                            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Próximo Aumento</th>
                         </tr>
-                    `).join('')}
-                </tbody>
-                <tfoot class="bg-gray-50">
-                    <tr class="font-bold">
-                        <td colspan="3" class="px-4 py-3 text-right">TOTAL MENSUAL:</td>
-                        <td class="px-4 py-3 text-right text-xl text-green-600">${UI.formatCurrency(data.total_monthly_income || 0)}</td>
-                        <td colspan="2"></td>
-                    </tr>
-                </tfoot>
-            </table>
-        </div>
-    `;
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                        ${contracts.map(prop => `
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-3 font-medium">${AppUtils.escapeHtml(prop.property_address || 'No especificada')}</td>
+                                <td class="px-4 py-3">${AppUtils.escapeHtml(prop.tenant_name || 'Sin inquilino')}</td>
+                                <td class="px-4 py-3">
+                                    ${prop.tenant_email ? `<div class="text-sm">${AppUtils.escapeHtml(prop.tenant_email)}</div>` : ''}
+                                    ${prop.tenant_phone ? `<div class="text-xs text-gray-500">${AppUtils.escapeHtml(prop.tenant_phone)}</div>` : ''}
+                                </td>
+                                <td class="px-4 py-3 text-right font-semibold text-green-600">${AppUtils.formatCurrency(prop.base_amount)}</td>
+                                <td class="px-4 py-3 text-center">
+                                    ${prop.last_payment_date ? `<span class="text-sm">${AppUtils.formatDate(prop.last_payment_date)}</span>` : '<span class="text-gray-400 text-sm">Sin pagos</span>'}
+                                </td>
+                                <td class="px-4 py-3 text-center">
+                                    ${prop.next_increase_date ? `
+                                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getIncreaseClass(prop.next_increase_date)}">
+                                            ${AppUtils.formatDate(prop.next_increase_date)}
+                                        </span>
+                                    ` : '<span class="text-gray-400 text-sm">No programado</span>'}
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                    <tfoot class="bg-gray-50">
+                        <tr class="font-bold">
+                            <td colspan="3" class="px-4 py-3 text-right">TOTAL MENSUAL:</td>
+                            <td class="px-4 py-3 text-right text-xl text-green-600">${AppUtils.formatCurrency(data.total_monthly_income || 0)}</td>
+                            <td colspan="2"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        `;
+    } else {
+        html += `
+            <div class="text-center py-4 text-gray-500 mt-4">
+                <i class="fas fa-file-contract text-2xl mb-2 opacity-50"></i>
+                <p>No tiene contratos activos</p>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
 }
 
 function getIncreaseClass(nextIncreaseDate) {
@@ -242,6 +431,10 @@ function getIncreaseClass(nextIncreaseDate) {
     if (daysUntil <= 30) return 'bg-yellow-100 text-yellow-800';
     return 'bg-green-100 text-green-800';
 }
+
+// ============================================
+// CRUD DE PROPIETARIOS CON VALIDACIONES
+// ============================================
 
 function openOwnerModal(owner = null) {
     const modal = document.getElementById('ownerModal');
@@ -271,12 +464,36 @@ function openOwnerModal(owner = null) {
 
 async function saveOwner(e) {
     e.preventDefault();
-    console.log('🚀 saveOwner iniciado');
+    
+    const form = document.getElementById('ownerForm');
+    UI.clearAllFieldErrors(form);
+    
+    const nameInput = document.getElementById('ownerName');
+    const emailInput = document.getElementById('ownerEmail');
+    const phoneInput = document.getElementById('ownerPhone');
+    
+    let isValid = true;
+    
+    if (!UI.validateField(nameInput, null, null)) {
+        isValid = false;
+    }
+    
+    if (emailInput.value.trim() && !UI.validateEmail(emailInput.value.trim())) {
+        UI.showFieldError(emailInput, 'El email no es válido');
+        isValid = false;
+    }
+    
+    if (phoneInput.value.trim() && !UI.validatePhone(phoneInput.value.trim())) {
+        UI.showFieldError(phoneInput, 'El teléfono debe tener al menos 8 dígitos');
+        isValid = false;
+    }
+    
+    if (!isValid) return;
     
     const ownerData = {
-        name: document.getElementById('ownerName').value.trim(),
-        email: document.getElementById('ownerEmail').value.trim(),
-        phone: document.getElementById('ownerPhone').value.trim(),
+        name: nameInput.value.trim(),
+        email: emailInput.value.trim(),
+        phone: phoneInput.value.trim(),
         dni: document.getElementById('ownerDni').value.trim(),
         address: document.getElementById('ownerAddress').value.trim(),
         bank_account: document.getElementById('ownerBankAccount').value.trim()
@@ -287,8 +504,6 @@ async function saveOwner(e) {
     
     const id = document.getElementById('ownerId').value;
     if (id) ownerData.id = parseInt(id);
-    
-    if (!ownerData.name) return UI.toast('El nombre es obligatorio', 'warning');
     
     const submitBtn = document.querySelector('#ownerForm button[type="submit"]');
     const originalText = submitBtn.innerHTML;
@@ -321,8 +536,6 @@ async function saveOwner(e) {
     }
 }
 
-
-
 async function editOwner(id) {
     const owner = currentOwners.find(o => o.id === id);
     if (owner) openOwnerModal(owner);
@@ -347,18 +560,9 @@ async function deleteOwner(id) {
     }
 }
 
-function escapeHtml(text) {
-    if (!text) return '';
-    return String(text).replace(/[&<>]/g, function(m) {
-        return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m];
-    });
-}
 // ============================================
-// FUNCIONES DE EXPORTACIÓN PARA PROPIEDADES
+// FUNCIONES DE EXPORTACIÓN
 // ============================================
-
-let currentPropertiesData = null;
-let currentOwnerName = '';
 
 function setPropertiesData(data, ownerName, ownerEmail) {
     currentPropertiesData = data;
@@ -374,11 +578,16 @@ function imprimirPropiedades() {
     const fecha = new Date().toLocaleDateString('es-ES');
     
     const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        UI.toast('No se pudo abrir la ventana de impresión', 'error');
+        return;
+    }
+    
     printWindow.document.write(`
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Propiedades de ${ownerName} - Tenant CRM</title>
+            <title>Propiedades de ${AppUtils.escapeHtml(ownerName)} - Tenant CRM</title>
             <script src="https://cdn.tailwindcss.com"><\/script>
             <style>
                 @media print {
@@ -394,7 +603,7 @@ function imprimirPropiedades() {
             </style>
         </head>
         <body>
-            <h1>Tenant CRM - Propiedades de ${escapeHtml(ownerName)}</h1>
+            <h1>Tenant CRM - Propiedades de ${AppUtils.escapeHtml(ownerName)}</h1>
             <p>Fecha de generación: ${fecha}</p>
             ${printContent}
             <div class="no-print text-center mt-8">
@@ -417,7 +626,6 @@ function exportarPropiedadesPDF() {
         const ownerName = currentOwnerName;
         const fecha = new Date().toLocaleDateString('es-ES');
         
-        // Título
         doc.setFontSize(18);
         doc.setTextColor(79, 70, 229);
         doc.text(`Propiedades de ${ownerName}`, 14, 22);
@@ -426,20 +634,18 @@ function exportarPropiedadesPDF() {
         doc.setTextColor(0, 0, 0);
         doc.text(`Fecha: ${fecha}`, 14, 32);
         
-        // Preparar datos para la tabla
         const properties = currentPropertiesData.contracts || [];
         const tableHeaders = [['Dirección', 'Inquilino', 'Contacto', 'Renta Mensual', 'Último Pago', 'Próximo Aumento']];
         const tableBody = properties.map(prop => [
             prop.property_address || 'No especificada',
             prop.tenant_name || 'Sin inquilino',
             prop.tenant_email || prop.tenant_phone || '-',
-            `$${Number(prop.base_amount).toLocaleString()}`,
-            prop.last_payment_date ? new Date(prop.last_payment_date).toLocaleDateString() : 'Sin pagos',
-            prop.next_increase_date ? new Date(prop.next_increase_date).toLocaleDateString() : 'No programado'
+            AppUtils.formatCurrency(prop.base_amount),
+            prop.last_payment_date ? AppUtils.formatDate(prop.last_payment_date) : 'Sin pagos',
+            prop.next_increase_date ? AppUtils.formatDate(prop.next_increase_date) : 'No programado'
         ]);
         
-        // Agregar total
-        tableBody.push(['', '', '', `TOTAL: $${(currentPropertiesData.total_monthly_income || 0).toLocaleString()}`, '', '']);
+        tableBody.push(['', '', '', `TOTAL: ${AppUtils.formatCurrency(currentPropertiesData.total_monthly_income || 0)}`, '', '']);
         
         doc.autoTable({
             head: tableHeaders,
@@ -479,18 +685,17 @@ function exportarPropiedadesExcel() {
             'Inquilino': prop.tenant_name || 'Sin inquilino',
             'Email Inquilino': prop.tenant_email || '-',
             'Teléfono Inquilino': prop.tenant_phone || '-',
-            'Renta Mensual': `$${Number(prop.base_amount).toLocaleString()}`,
-            'Último Pago': prop.last_payment_date ? new Date(prop.last_payment_date).toLocaleDateString() : 'Sin pagos',
-            'Próximo Aumento': prop.next_increase_date ? new Date(prop.next_increase_date).toLocaleDateString() : 'No programado'
+            'Renta Mensual': AppUtils.formatCurrency(prop.base_amount),
+            'Último Pago': prop.last_payment_date ? AppUtils.formatDate(prop.last_payment_date) : 'Sin pagos',
+            'Próximo Aumento': prop.next_increase_date ? AppUtils.formatDate(prop.next_increase_date) : 'No programado'
         }));
         
-        // Agregar fila de total
         excelData.push({
             'Dirección': 'TOTAL',
             'Inquilino': '',
             'Email Inquilino': '',
             'Teléfono Inquilino': '',
-            'Renta Mensual': `$${(currentPropertiesData.total_monthly_income || 0).toLocaleString()}`,
+            'Renta Mensual': AppUtils.formatCurrency(currentPropertiesData.total_monthly_income || 0),
             'Último Pago': '',
             'Próximo Aumento': ''
         });
@@ -508,10 +713,6 @@ function exportarPropiedadesExcel() {
     }
 }
 
-// ============================================
-// FUNCIÓN PARA GENERAR TEXTO DEL REPORTE (EMAIL)
-// ============================================
-
 function generarTextoReporte() {
     const properties = currentPropertiesData.contracts || [];
     const fecha = new Date().toLocaleDateString('es-ES', {
@@ -520,9 +721,9 @@ function generarTextoReporte() {
     const totalIncome = currentPropertiesData.total_monthly_income || 0;
     
     let text = `========================================\n`;
-    text = `📊 REPORTE DE PROPIEDADES EN ALQUILER\n`;
+    text += `📊 REPORTE DE PROPIEDADES EN ALQUILER\n`;
     text += `========================================\n\n`;
-    text += `👤 PROPIETARIO: ${currentOwnerName}\n`;
+    text += `👤 PROPIETARIO: ${AppUtils.escapeHtml(currentOwnerName)}\n`;
     text += `📅 FECHA: ${fecha}\n\n`;
     text += `========================================\n`;
     text += `📋 PROPIEDADES EN ALQUILER\n`;
@@ -530,11 +731,11 @@ function generarTextoReporte() {
     
     properties.forEach((prop, index) => {
         text += `[${index + 1}] ${'='.repeat(40)}\n`;
-        text += `🏠 DIRECCIÓN: ${prop.property_address || 'No especificada'}\n`;
-        text += `👤 INQUILINO: ${prop.tenant_name || 'Sin inquilino'}\n`;
-        if (prop.tenant_email) text += `📧 EMAIL INQUILINO: ${prop.tenant_email}\n`;
-        if (prop.tenant_phone) text += `📞 TELÉFONO INQUILINO: ${prop.tenant_phone}\n`;
-        text += `💰 RENTA MENSUAL: $${Number(prop.base_amount || 0).toLocaleString()}\n`;
+        text += `🏠 DIRECCIÓN: ${AppUtils.escapeHtml(prop.property_address || 'No especificada')}\n`;
+        text += `👤 INQUILINO: ${AppUtils.escapeHtml(prop.tenant_name || 'Sin inquilino')}\n`;
+        if (prop.tenant_email) text += `📧 EMAIL INQUILINO: ${AppUtils.escapeHtml(prop.tenant_email)}\n`;
+        if (prop.tenant_phone) text += `📞 TELÉFONO INQUILINO: ${AppUtils.escapeHtml(prop.tenant_phone)}\n`;
+        text += `💰 RENTA MENSUAL: ${AppUtils.formatCurrency(prop.base_amount || 0)}\n`;
         text += `📅 ÚLTIMO PAGO: ${prop.last_payment_date ? new Date(prop.last_payment_date).toLocaleDateString() : 'Sin pagos registrados'}\n`;
         text += `📈 PRÓXIMO AUMENTO: ${prop.next_increase_date ? new Date(prop.next_increase_date).toLocaleDateString() : 'No programado'}\n\n`;
     });
@@ -543,9 +744,9 @@ function generarTextoReporte() {
     text += `💰 RESUMEN FINANCIERO\n`;
     text += `========================================\n`;
     text += `🏘️ TOTAL PROPIEDADES: ${properties.length}\n`;
-    text += `💰 INGRESO MENSUAL TOTAL: $${Number(totalIncome).toLocaleString()}\n`;
-        if (properties.length > 0) {
-        text += `📊 PROMEDIO POR PROPIEDAD: $${Math.round(totalIncome / properties.length).toLocaleString()}\n`;
+    text += `💰 INGRESO MENSUAL TOTAL: ${AppUtils.formatCurrency(totalIncome)}\n`;
+    if (properties.length > 0) {
+        text += `📊 PROMEDIO POR PROPIEDAD: ${AppUtils.formatCurrency(Math.round(totalIncome / properties.length))}\n`;
     }
     text += `\n========================================\n`;
     text += `📧 Este reporte fue generado automáticamente por Mortola y Asociados\n`;
@@ -553,10 +754,6 @@ function generarTextoReporte() {
     
     return text;
 }
-
-// ============================================
-// FUNCIÓN PARA ENVIAR EMAIL (GMAIL UNIVERSAL)
-// ============================================
 
 function enviarEmailPropietario() {
     if (!currentPropertiesData || !currentOwnerName) {
@@ -571,34 +768,26 @@ function enviarEmailPropietario() {
         return;
     }
     
-    // Generar el contenido del email
     const subject = `Reporte de Propiedades - ${currentOwnerName} - Tenant CRM`;
     const body = generarTextoReporte();
     
-    // Codificar para URL
     const encodedSubject = encodeURIComponent(subject);
     const encodedBody = encodeURIComponent(body);
     
-    // Detectar si es dispositivo móvil
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     
     let mailtoLink;
     
     if (isMobile) {
-        // En móvil: usar intent de Gmail app
         mailtoLink = `intent://mailto:${ownerEmail}?subject=${encodedSubject}&body=${encodedBody}#Intent;scheme=mailto;package=com.google.android.gm;end`;
     } else {
-        // En computadora: usar Gmail web
         mailtoLink = `https://mail.google.com/mail/?view=cm&fs=1&to=${ownerEmail}&su=${encodedSubject}&body=${encodedBody}`;
     }
     
-    // Abrir el enlace
     window.open(mailtoLink, '_blank');
-    
     UI.toast('Abriendo Gmail...', 'info');
 }
 
-// También mantén la versión alternativa para Outlook/Hotmail si lo prefieres
 function enviarEmailOutlook() {
     if (!currentPropertiesData || !currentOwnerName) return;
     
@@ -614,7 +803,6 @@ function enviarEmailOutlook() {
     const encodedSubject = encodeURIComponent(subject);
     const encodedBody = encodeURIComponent(body);
     
-    // Outlook/Hotmail web
     const outlookLink = `https://outlook.live.com/mail/0/deeplink/compose?to=${ownerEmail}&subject=${encodedSubject}&body=${encodedBody}`;
     
     window.open(outlookLink, '_blank');
@@ -629,18 +817,17 @@ function generarHTMLReportePropiedades() {
     });
     const totalIncome = currentPropertiesData.total_monthly_income || 0;
     
-    // Generar filas de la tabla
     let tableRows = '';
     properties.forEach(prop => {
-        const lastPayment = prop.last_payment_date ? new Date(prop.last_payment_date).toLocaleDateString() : 'Sin pagos';
-        const nextIncrease = prop.next_increase_date ? new Date(prop.next_increase_date).toLocaleDateString() : 'No programado';
+        const lastPayment = prop.last_payment_date ? AppUtils.formatDate(prop.last_payment_date) : 'Sin pagos';
+        const nextIncrease = prop.next_increase_date ? AppUtils.formatDate(prop.next_increase_date) : 'No programado';
         
         tableRows += `
             <tr style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 12px 8px;">${escapeHtml(prop.property_address || 'No especificada')}</td>
-                <td style="padding: 12px 8px;">${escapeHtml(prop.tenant_name || 'Sin inquilino')}</td>
-                <td style="padding: 12px 8px;">${escapeHtml(prop.tenant_email || '-')}<br><small style="color:#6b7280;">${escapeHtml(prop.tenant_phone || '')}</small></td>
-                <td style="padding: 12px 8px; text-align: right; font-weight: bold; color: #10b981;">$${Number(prop.base_amount || 0).toLocaleString()}</td>
+                <td style="padding: 12px 8px;">${AppUtils.escapeHtml(prop.property_address || 'No especificada')}</td>
+                <td style="padding: 12px 8px;">${AppUtils.escapeHtml(prop.tenant_name || 'Sin inquilino')}</td>
+                <td style="padding: 12px 8px;">${AppUtils.escapeHtml(prop.tenant_email || '-')}<br><small style="color:#6b7280;">${AppUtils.escapeHtml(prop.tenant_phone || '')}</small></td>
+                <td style="padding: 12px 8px; text-align: right; font-weight: bold; color: #10b981;">${AppUtils.formatCurrency(prop.base_amount || 0)}</td>
                 <td style="padding: 12px 8px; text-align: center;">${lastPayment}</td>
                 <td style="padding: 12px 8px; text-align: center;">${nextIncrease}</td>
             </tr>
@@ -653,7 +840,7 @@ function generarHTMLReportePropiedades() {
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Reporte de Propiedades - ${escapeHtml(ownerName)}</title>
+            <title>Reporte de Propiedades - ${AppUtils.escapeHtml(ownerName)}</title>
             <style>
                 body {
                     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -771,7 +958,7 @@ function generarHTMLReportePropiedades() {
                     <p>Reporte de Propiedades en Alquiler</p>
                 </div>
                 <div class="content">
-                    <h2 style="font-size: 20px; margin-bottom: 10px;">${escapeHtml(ownerName)}</h2>
+                    <h2 style="font-size: 20px; margin-bottom: 10px;">${AppUtils.escapeHtml(ownerName)}</h2>
                     <p style="color: #6b7280; margin-bottom: 20px;">Fecha de generación: ${fecha}</p>
                     
                     <div class="summary">
@@ -781,11 +968,11 @@ function generarHTMLReportePropiedades() {
                         </div>
                         <div class="summary-item">
                             <div class="summary-label">Ingreso Mensual Total</div>
-                            <div class="summary-value">$${totalIncome.toLocaleString()}</div>
+                            <div class="summary-value">${AppUtils.formatCurrency(totalIncome)}</div>
                         </div>
                         <div class="summary-item">
                             <div class="summary-label">Promedio por Propiedad</div>
-                            <div class="summary-value">$${properties.length > 0 ? Math.round(totalIncome / properties.length).toLocaleString() : 0}</div>
+                            <div class="summary-value">${properties.length > 0 ? AppUtils.formatCurrency(Math.round(totalIncome / properties.length)) : '$0'}</div>
                         </div>
                     </div>
                     
@@ -815,8 +1002,12 @@ function generarHTMLReportePropiedades() {
     `;
 }
 
-// Funciones globales
+// ============================================
+// FUNCIONES GLOBALES
+// ============================================
+
 window.viewProperties = viewProperties;
 window.editOwner = editOwner;
 window.deleteOwner = deleteOwner;
 window.closePropertiesModal = closePropertiesModal;
+window.irPaginaOwners = irPaginaOwners;

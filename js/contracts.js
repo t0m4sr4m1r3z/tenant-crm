@@ -1,18 +1,24 @@
-// contracts.js - Versión FINAL CORREGIDA (sin duplicaciones)
-// API Client
+// contracts.js - Gestión de Contratos (Versión con permisos) – CORREGIDO
 const API = {
     baseUrl: '/.netlify/functions',
 
-    
     async request(endpoint, options = {}) {
-        const token = localStorage.getItem('authToken');
-        
+        const token = sessionStorage.getItem('authToken');
+
+        const isGet = !options.method || options.method === 'GET';
+        if (isGet) {
+            const cached = window.APICache ? window.APICache.get(endpoint, options) : null;
+            if (cached) {
+                return cached;
+            }
+        }
+
         const headers = {
             'Content-Type': 'application/json',
             ...(token && { 'Authorization': token }),
             ...options.headers
         };
-        
+
         try {
             console.log(`🌐 Llamando a ${endpoint}...`);
             
@@ -22,8 +28,8 @@ const API = {
             });
             
             if (response.status === 401) {
-                localStorage.removeItem('authToken');
-                localStorage.removeItem('user');
+                sessionStorage.removeItem('authToken');
+                sessionStorage.removeItem('user');
                 if (window.UI) UI.toast('Sesión expirada', 'warning');
                 setTimeout(() => {
                     window.location.href = '/login.html';
@@ -39,7 +45,11 @@ const API = {
                 if (!response.ok) {
                     throw new Error(data.error || data.message || 'Error en la petición');
                 }
-                
+
+                if (isGet && window.APICache) {
+                    window.APICache.set(endpoint, data, options);
+                }
+
                 return data;
             } catch (parseError) {
                 console.error('❌ Error parseando JSON:', parseError);
@@ -82,89 +92,70 @@ const API = {
     
     async getOwners() {
         return this.request('/owners');
+    },
+
+    async getProperties() {
+        return this.request('/properties');
     }
 };
 
 // Estado global
 let currentContracts = [];
+let currentPage = 1;
+const PAGE_SIZE = 10;
+let filteredContracts = [];
 let currentTenants = [];
 let currentOwners = [];
+let currentProperties = [];
 let currentFilter = 'all';
 let searchTimeout = null;
 let currentReceiptData = null;
 let cachedIndices = null;
 let lastIndicesUpdate = null;
+let currentContractFiles = [];
+const cloudinaryCloudName = 'dwapdg9aq';
 
 // Inicialización
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('📄 Página de contratos cargada');
     
-    // Verificar UI
-    if (!window.UI) {
-        window.UI = {
-            toast: (msg, type) => {
-                console.log(`${type}: ${msg}`);
-                alert(`${type.toUpperCase()}: ${msg}`);
-            },
-            confirm: (options) => {
-                if (confirm(options.message)) options.onConfirm();
-                else if (options.onCancel) options.onCancel();
-            },
-            showLoading: (id, msg) => {
-                const el = document.getElementById(id);
-                if (el) el.innerHTML = `§<td colspan="7" class="text-center py-4"><div class="spinner mx-auto mb-2"></div><p class="text-gray-500">${msg}</p>§</td>`;
-            },
-            hideLoading: (id) => {},
-            formatCurrency: (amount) => {
-                if (amount === undefined || amount === null) return '$0';
-                return `$${Number(amount).toLocaleString()}`;
-            },
-            formatDate: (date) => {
-                if (!date) return '';
-                return new Date(date).toLocaleDateString('es-ES');
-            }
-        };
-    }
-    
-    const token = localStorage.getItem('authToken');
+    const token = sessionStorage.getItem('authToken');
     if (!token) {
         window.location.href = '/login.html';
         return;
     }
     
-    initSidebar();
+    AppSidebar.init();
     initModals();
     initSearch();
-    await loadTenants();
-    await loadOwners();
+    
+    // Crear contenedor de paginación
+    if (!document.getElementById('contractsPagination')) {
+        const tableContainer = document.querySelector('.bg-white.rounded-xl.shadow-sm.border.border-gray-100.overflow-hidden');
+        if (tableContainer) {
+            const paginationDiv = document.createElement('div');
+            paginationDiv.id = 'contractsPagination';
+            paginationDiv.className = 'flex justify-between items-center px-6 py-3 bg-gray-50 border-t border-gray-200';
+            tableContainer.appendChild(paginationDiv);
+        }
+    }
+    
+    // Cargar datos en paralelo
+    await Promise.all([
+        loadTenants(),
+        loadOwners(),
+        loadProperties()
+    ]);
+    
     await loadContracts();
     initEventListeners();
-});
 
-function initSidebar() {
-    const menuBtn = document.getElementById('menuBtn');
-    const sidebar = document.getElementById('sidebar');
-    const closeBtn = document.getElementById('closeSidebarBtn');
-    const overlay = document.getElementById('sidebarOverlay');
-    
-    if (menuBtn && sidebar) {
-        menuBtn.addEventListener('click', () => {
-            sidebar.classList.remove('hidden');
-        });
+    // Ocultar botón de nuevo si no tiene permiso
+    const addBtn = document.getElementById('addContractBtn');
+    if (addBtn && !AUTH.hasPermission('canCreate')) {
+        addBtn.style.display = 'none';
     }
-    
-    if (closeBtn && sidebar) {
-        closeBtn.addEventListener('click', () => {
-            sidebar.classList.add('hidden');
-        });
-    }
-    
-    if (overlay && sidebar) {
-        overlay.addEventListener('click', () => {
-            sidebar.classList.add('hidden');
-        });
-    }
-}
+});
 
 function initSearch() {
     const searchInput = document.getElementById('searchContracts');
@@ -269,6 +260,9 @@ function initModals() {
     });
 }
 
+// ============================================
+// CARGAR DATOS
+// ============================================
 
 async function loadOwners() {
     try {
@@ -276,6 +270,7 @@ async function loadOwners() {
         populateOwnerSelect();
     } catch (error) {
         console.error('Error cargando propietarios:', error);
+        currentOwners = [];
     }
 }
 
@@ -289,7 +284,7 @@ function populateOwnerSelect() {
     }
     
     select.innerHTML = '<option value="">Seleccionar propietario...</option>' +
-        currentOwners.map(o => `<option value="${o.id}">${escapeHtml(o.name)}${o.dni ? ` (${escapeHtml(o.dni)})` : ''}</option>`).join('');
+        currentOwners.map(o => `<option value="${o.id}">${AppUtils.escapeHtml(o.name)}${o.dni ? ` (${AppUtils.escapeHtml(o.dni)})` : ''}</option>`).join('');
 }
 
 async function loadTenants() {
@@ -298,6 +293,7 @@ async function loadTenants() {
         populateTenantSelect();
     } catch (error) {
         console.error('Error cargando inquilinos:', error);
+        currentTenants = [];
     }
 }
 
@@ -311,8 +307,43 @@ function populateTenantSelect() {
     }
     
     select.innerHTML = '<option value="">Seleccionar inquilino...</option>' +
-        currentTenants.map(t => `<option value="${t.id}">${escapeHtml(t.name)} (${escapeHtml(t.dni)})</option>`).join('');
+        currentTenants.map(t => `<option value="${t.id}">${AppUtils.escapeHtml(t.name)} (${AppUtils.escapeHtml(t.dni)})</option>`).join('');
 }
+
+async function loadProperties() {
+    try {
+        currentProperties = await API.getProperties();
+        populatePropertySelect();
+    } catch (error) {
+        console.error('Error cargando propiedades:', error);
+        currentProperties = [];
+        const select = document.getElementById('contractPropertyId');
+        if (select) {
+            select.innerHTML = '<option value="">Error al cargar propiedades</option>';
+        }
+    }
+}
+
+function populatePropertySelect() {
+    const select = document.getElementById('contractPropertyId');
+    if (!select) return;
+    
+    if (!currentProperties || currentProperties.length === 0) {
+        select.innerHTML = '<option value="">No hay propiedades disponibles</option>';
+        return;
+    }
+    
+    select.innerHTML = '<option value="">Seleccionar propiedad...</option>' +
+        currentProperties.map(p => {
+            const address = AppUtils.escapeHtml(p.address);
+            const ownerName = p.owner_name ? ` (${AppUtils.escapeHtml(p.owner_name)})` : '';
+            return `<option value="${p.id}">${address}${ownerName}</option>`;
+        }).join('');
+}
+
+// ============================================
+// FUNCIONES DE PAGINACIÓN
+// ============================================
 
 async function loadContracts() {
     const tableBody = document.getElementById('contractsTableBody');
@@ -321,14 +352,16 @@ async function loadContracts() {
     try {
         UI.showLoading('contractsTableBody', 'Cargando contratos...');
         currentContracts = await API.getContracts();
+        filteredContracts = [...(currentContracts || [])];
+        currentPage = 1;
         updateContractsCount();
-        renderizarTablaContratos(currentContracts);
+        renderizarContratosPaginado();
     } catch (error) {
         console.error('Error cargando contratos:', error);
         UI.toast('Error al cargar los contratos', 'error');
         tableBody.innerHTML = `
             <tr>
-                <td colspan="7" class="px-6 py-8 text-center text-gray-500">
+                <td colspan="8" class="px-6 py-8 text-center text-gray-500">
                     <i class="fas fa-exclamation-triangle text-3xl mb-3 text-red-400"></i>
                     <p>Error al cargar los datos</p>
                     <button onclick="location.reload()" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
@@ -342,11 +375,15 @@ async function loadContracts() {
     }
 }
 
-function updateContractsCount() {
-    const countSpan = document.getElementById('contractsCount');
-    if (countSpan) {
-        countSpan.textContent = currentContracts.length;
-    }
+function renderizarContratosPaginado() {
+    const totalItems = filteredContracts.length;
+    const totalPages = Math.ceil(totalItems / PAGE_SIZE);
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    const pageItems = filteredContracts.slice(start, end);
+    
+    renderizarTablaContratos(pageItems);
+    renderPaginationContracts(totalItems, totalPages);
 }
 
 function renderizarTablaContratos(contracts) {
@@ -356,22 +393,24 @@ function renderizarTablaContratos(contracts) {
     if (!contracts || contracts.length === 0) {
         tableBody.innerHTML = `
             <tr>
-                <td colspan="7" class="px-6 py-8 text-center text-gray-500">
+                <td colspan="8" class="px-6 py-8 text-center text-gray-500">
                     <i class="fas fa-file-contract text-4xl mb-3 opacity-50"></i>
                     <p>No hay contratos registrados</p>
-                    <button onclick="abrirModalNuevoContratoGlobal()" 
-                            class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                    ${AUTH.hasPermission('canCreate') ? `<button onclick="abrirModalNuevoContratoGlobal()" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
                         <i class="fas fa-plus mr-1"></i>Crear el primero
-                    </button>
+                    </button>` : ''}
                 </td>
             </tr>
         `;
         return;
     }
+
+    const canEdit = AUTH.hasPermission('canEdit');
+    const canDelete = AUTH.hasPermission('canDelete');
     
     tableBody.innerHTML = contracts.map(contract => {
         const nextIncrease = contract.next_increase_date 
-            ? UI.formatDate(contract.next_increase_date)
+            ? AppUtils.formatDate(contract.next_increase_date)
             : 'No programado';
         
         const statusClass = {
@@ -387,12 +426,21 @@ function renderizarTablaContratos(contracts) {
             'expired': 'Vencido',
             'terminated': 'Terminado'
         }[contract.status] || contract.status;
+
+        let propertyDisplay = contract.property_address || 'Sin propiedad';
+        if (contract.property_id && currentProperties && currentProperties.length > 0) {
+            const prop = currentProperties.find(p => p.id === contract.property_id);
+            if (prop) {
+                propertyDisplay = prop.address;
+            }
+        }
         
         return `
             <tr class="hover:bg-gray-50 transition">
-                <td class="px-6 py-4">${escapeHtml(contract.tenant_name || 'N/A')}</td>
-                <td class="px-6 py-4">${escapeHtml(contract.owner_name || 'N/A')}</td>
-                <td class="px-6 py-4">${UI.formatCurrency(contract.base_amount)}</td>
+                <td class="px-6 py-4">${AppUtils.escapeHtml(contract.tenant_name || 'N/A')}</td>
+                <td class="px-6 py-4">${AppUtils.escapeHtml(contract.owner_name || 'N/A')}</td>
+                <td class="px-6 py-4">${AppUtils.escapeHtml(propertyDisplay)}</td>
+                <td class="px-6 py-4">${AppUtils.formatCurrency(contract.base_amount)}</td>
                 <td class="px-6 py-4">${contract.duration} meses</td>
                 <td class="px-6 py-4">${nextIncrease}</td>
                 <td class="px-6 py-4">
@@ -405,16 +453,8 @@ function renderizarTablaContratos(contracts) {
                                 title="Calcular aumento">
                             <i class="fas fa-calculator"></i>
                         </button>
-                        <button onclick="editarContratoGlobal(${contract.id})" 
-                                class="text-blue-600 hover:text-blue-800 p-2 rounded-lg hover:bg-blue-50 transition"
-                                title="Editar contrato">
-                            <i class="fas fa-edit"></i>
-                        </button>
-                        <button onclick="eliminarContratoGlobal(${contract.id})" 
-                                class="text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-50 transition"
-                                title="Eliminar contrato">
-                            <i class="fas fa-trash"></i>
-                        </button>
+                        ${canEdit ? `<button onclick="editarContratoGlobal(${contract.id})" class="text-blue-600 hover:text-blue-800 p-2 rounded-lg hover:bg-blue-50 transition" title="Editar contrato"><i class="fas fa-edit"></i></button>` : ''}
+                        ${canDelete ? `<button onclick="eliminarContratoGlobal(${contract.id})" class="text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-50 transition" title="Eliminar contrato"><i class="fas fa-trash"></i></button>` : ''}
                     </div>
                 </td>
             </tr>
@@ -422,26 +462,83 @@ function renderizarTablaContratos(contracts) {
     }).join('');
 }
 
-function filterContracts(searchTerm) {
-    let filtered = currentContracts;
+function renderPaginationContracts(totalItems, totalPages) {
+    const container = document.getElementById('contractsPagination');
+    if (!container) return;
     
+    if (totalItems === 0) {
+        container.innerHTML = '';
+        return;
+    }
+    
+    const startItem = (currentPage - 1) * PAGE_SIZE + 1;
+    const endItem = Math.min(currentPage * PAGE_SIZE, totalItems);
+    
+    container.innerHTML = `
+        <div class="flex flex-wrap items-center justify-between gap-3 w-full">
+            <div class="text-sm text-gray-600">
+                Mostrando <span class="font-medium">${startItem}</span> - <span class="font-medium">${endItem}</span> de <span class="font-medium">${totalItems}</span> contratos
+            </div>
+            <div class="flex items-center gap-2">
+                <button onclick="irPaginaContracts(${currentPage - 1})" 
+                        class="px-3 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 transition ${currentPage === 1 ? 'opacity-50 cursor-not-allowed' : ''}"
+                        ${currentPage === 1 ? 'disabled' : ''}
+                        aria-label="Página anterior">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+                <span class="text-sm font-medium px-3 py-1 bg-blue-100 text-blue-700 rounded-lg">${currentPage} / ${totalPages}</span>
+                <button onclick="irPaginaContracts(${currentPage + 1})" 
+                        class="px-3 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 transition ${currentPage === totalPages ? 'opacity-50 cursor-not-allowed' : ''}"
+                        ${currentPage === totalPages ? 'disabled' : ''}
+                        aria-label="Página siguiente">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function irPaginaContracts(page) {
+    const totalPages = Math.ceil(filteredContracts.length / PAGE_SIZE);
+    if (page < 1 || page > totalPages) return;
+    currentPage = page;
+    renderizarContratosPaginado();
+}
+
+function updateContractsCount() {
+    const countSpan = document.getElementById('contractsCount');
+    if (countSpan) {
+        countSpan.textContent = currentContracts.length;
+    }
+}
+
+// ============================================
+// FILTROS Y BÚSQUEDA
+// ============================================
+
+function filterContracts(searchTerm) {
     if (searchTerm && searchTerm.trim()) {
         const term = searchTerm.toLowerCase().trim();
-        filtered = filtered.filter(c => 
+        filteredContracts = currentContracts.filter(c => 
             (c.tenant_name && c.tenant_name.toLowerCase().includes(term)) ||
-            (c.owner_name && c.owner_name.toLowerCase().includes(term))
+            (c.owner_name && c.owner_name.toLowerCase().includes(term)) ||
+            (c.property_address && c.property_address.toLowerCase().includes(term))
         );
+    } else {
+        filteredContracts = [...currentContracts];
     }
     
     if (currentFilter !== 'all') {
-        filtered = filtered.filter(c => c.status === currentFilter);
+        filteredContracts = filteredContracts.filter(c => c.status === currentFilter);
     }
     
-    renderizarTablaContratos(filtered);
+    currentPage = 1;
+    renderizarContratosPaginado();
 }
 
 function applyFilter() {
-    filterContracts(document.getElementById('searchContracts').value);
+    const searchTerm = document.getElementById('searchContracts').value;
+    filterContracts(searchTerm);
 }
 
 // ============================================
@@ -467,12 +564,14 @@ function abrirModalNuevoContratoInterno() {
     const frequencyInput = document.getElementById('contractIncreaseFrequency');
     const commissionInput = document.getElementById('contractAgentCommission');
     const statusInput = document.getElementById('contractStatus');
+    const propertySelect = document.getElementById('contractPropertyId');
     
     if (startDateInput) startDateInput.value = today;
     if (referenceDateInput) referenceDateInput.value = '';
     if (frequencyInput) frequencyInput.value = '12';
     if (commissionInput) commissionInput.value = '5';
     if (statusInput) statusInput.value = 'active';
+    if (propertySelect) propertySelect.value = '';
     
     modal.classList.remove('hidden');
 }
@@ -496,7 +595,12 @@ function abrirModalEditarContratoInterno(contractId) {
     document.getElementById('contractId').value = contract.id;
     document.getElementById('contractTenantId').value = contract.tenant_id || '';
     document.getElementById('contractOwnerId').value = contract.owner_id || '';
-    document.getElementById('contractAddress').value = contract.property_address || '';
+    
+    const propertySelect = document.getElementById('contractPropertyId');
+    if (propertySelect) {
+        propertySelect.value = contract.property_id || '';
+    }
+    
     document.getElementById('contractBaseAmount').value = contract.base_amount;
     document.getElementById('contractDuration').value = contract.duration;
     document.getElementById('contractStartDate').value = contract.start_date;
@@ -512,39 +616,104 @@ function abrirModalEditarContratoInterno(contractId) {
     
     modal.classList.remove('hidden');
     
-    // Limpiar archivos anteriores ANTES de cargar los nuevos
     currentContractFiles = [];
     mostrarArchivos([]);
     
-    // Cargar archivos del contrato
     cargarArchivosContrato(contractId);
     initFileUpload(contractId);
 }
 
+// ============================================
+// GUARDAR CONTRATO CON VALIDACIONES MEJORADAS
+// ============================================
+
 async function guardarContrato() {
+    const form = document.getElementById('contractForm');
+    UI.clearAllFieldErrors(form);
+    
+    const tenantIdInput = document.getElementById('contractTenantId');
+    const ownerIdInput = document.getElementById('contractOwnerId');
+    const propertyIdInput = document.getElementById('contractPropertyId');
+    const baseAmountInput = document.getElementById('contractBaseAmount');
+    const startDateInput = document.getElementById('contractStartDate');
+    const durationInput = document.getElementById('contractDuration');
+    const frequencyInput = document.getElementById('contractIncreaseFrequency');
+    const commissionInput = document.getElementById('contractAgentCommission');
+    
+    let isValid = true;
+    
+    if (!tenantIdInput.value) {
+        UI.showFieldError(tenantIdInput, 'Debes seleccionar un inquilino');
+        isValid = false;
+    }
+    
+    if (!ownerIdInput.value) {
+        UI.showFieldError(ownerIdInput, 'Debes seleccionar un propietario');
+        isValid = false;
+    }
+    
+    if (!propertyIdInput || !propertyIdInput.value) {
+        UI.showFieldError(propertyIdInput, 'Debes seleccionar una propiedad');
+        isValid = false;
+    }
+    
+    if (!UI.validateField(baseAmountInput, null, null)) {
+        isValid = false;
+    } else if (parseFloat(baseAmountInput.value) <= 0) {
+        UI.showFieldError(baseAmountInput, 'El monto debe ser mayor a 0');
+        isValid = false;
+    }
+    
+    if (!UI.validateField(startDateInput, null, null)) {
+        isValid = false;
+    }
+    
+    if (!UI.validateField(durationInput, null, null)) {
+        isValid = false;
+    } else if (parseInt(durationInput.value) < 1) {
+        UI.showFieldError(durationInput, 'La duración debe ser al menos 1 mes');
+        isValid = false;
+    }
+    
+    if (!UI.validateField(frequencyInput, null, null)) {
+        isValid = false;
+    } else if (parseInt(frequencyInput.value) < 1) {
+        UI.showFieldError(frequencyInput, 'La frecuencia debe ser al menos 1 mes');
+        isValid = false;
+    }
+    
+    if (!UI.validateField(commissionInput, null, null)) {
+        isValid = false;
+    } else if (parseFloat(commissionInput.value) < 0) {
+        UI.showFieldError(commissionInput, 'La comisión no puede ser negativa');
+        isValid = false;
+    }
+    
+    if (!isValid) return;
+    
+    const propertyId = parseInt(propertyIdInput.value);
+    const selectedProperty = currentProperties.find(p => p.id === propertyId);
+    const propertyAddress = selectedProperty ? selectedProperty.address : '';
+    
     const contractData = {
-        tenantId: parseInt(document.getElementById('contractTenantId').value),
-        ownerId: parseInt(document.getElementById('contractOwnerId').value) || null,  // ID del propietario
-        owner: document.getElementById('contractOwnerId').options[document.getElementById('contractOwnerId').selectedIndex]?.text || '', // Nombre del propietario
-        propertyAddress: document.getElementById('contractAddress').value.trim(),
-        baseAmount: parseFloat(document.getElementById('contractBaseAmount').value),
-        duration: parseInt(document.getElementById('contractDuration').value),
-        startDate: document.getElementById('contractStartDate').value,
+        tenantId: parseInt(tenantIdInput.value),
+        ownerId: parseInt(ownerIdInput.value) || null,
+        owner: ownerIdInput.options[ownerIdInput.selectedIndex]?.text || '',
+        propertyId: propertyId,
+        propertyAddress: propertyAddress,
+        baseAmount: parseFloat(baseAmountInput.value),
+        duration: parseInt(durationInput.value),
+        startDate: startDateInput.value,
         referenceDate: document.getElementById('contractReferenceDate')?.value || null,
         increaseType: document.getElementById('contractIncreaseType').value,
         increaseValue: document.getElementById('contractIncreaseValue').value ? parseFloat(document.getElementById('contractIncreaseValue').value) : null,
-        increaseFrequency: parseInt(document.getElementById('contractIncreaseFrequency').value),
-        agentCommission: parseFloat(document.getElementById('contractAgentCommission').value),
+        increaseFrequency: parseInt(frequencyInput.value),
+        agentCommission: parseFloat(commissionInput.value),
         status: document.getElementById('contractStatus').value
     };
     
     const id = document.getElementById('contractId').value;
     if (id) contractData.id = parseInt(id);
-    
-    if (!contractData.tenantId) return UI.toast('Debes seleccionar un inquilino', 'warning');
-    if (!contractData.ownerId) return UI.toast('El propietario es obligatorio', 'warning');
-    if (!contractData.baseAmount || contractData.baseAmount <= 0) return UI.toast('Monto inválido', 'warning');
-    if (!contractData.startDate) return UI.toast('Fecha de inicio obligatoria', 'warning');
     
     const submitBtn = document.querySelector('#contractForm button[type="submit"]');
     const originalText = submitBtn.innerHTML;
@@ -576,7 +745,6 @@ async function guardarContrato() {
 // ============================================
 
 async function cargarIndices() {
-    // Intentar usar el sistema central de índices
     if (window.getIndices) {
         const indices = window.getIndices();
         cachedIndices = {
@@ -589,7 +757,6 @@ async function cargarIndices() {
         return cachedIndices;
     }
     
-    // Fallback: verificar valores manuales en localStorage
     const savedIndices = localStorage.getItem('indices_globales');
     if (savedIndices) {
         try {
@@ -607,7 +774,6 @@ async function cargarIndices() {
         }
     }
     
-    // Valores por defecto
     cachedIndices = {
         ipc: { monthly: 2.0, yearly: 15.2, value: 100, date: '2026-03' },
         icl: { monthly: 2.1, value: 100, date: '2026-03' },
@@ -764,29 +930,29 @@ async function calcularAumento(contractId) {
             <div class="flex items-center justify-between border-b pb-3">
                 <div>
                     <p class="text-sm text-gray-500">Contrato #${contract.id}</p>
-                    <p class="font-semibold text-lg">${escapeHtml(contract.tenant_name || 'N/A')}</p>
+                    <p class="font-semibold text-lg">${AppUtils.escapeHtml(contract.tenant_name || 'N/A')}</p>
                 </div>
                 <span class="badge badge-info">${(contract.increase_type || 'N/A').toUpperCase()}</span>
             </div>
             
             <div class="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg">
-                <div><p class="text-xs text-gray-500">Monto Actual</p><p class="font-bold text-lg">${UI.formatCurrency(baseAmount)}</p></div>
+                <div><p class="text-xs text-gray-500">Monto Actual</p><p class="font-bold text-lg">${AppUtils.formatCurrency(baseAmount)}</p></div>
                 <div><p class="text-xs text-gray-500">Porcentaje</p><p class="font-bold text-lg text-blue-600">+${increasePercentage}%</p></div>
-                <div><p class="text-xs text-gray-500">Nuevo Monto</p><p class="font-bold text-lg text-green-600">${UI.formatCurrency(newAmount)}</p></div>
-                <div><p class="text-xs text-gray-500">Comisión (${parseFloat(contract.agent_commission || 5)}%)</p><p class="font-bold text-lg text-purple-600">${UI.formatCurrency(commission)}</p></div>
+                <div><p class="text-xs text-gray-500">Nuevo Monto</p><p class="font-bold text-lg text-green-600">${AppUtils.formatCurrency(newAmount)}</p></div>
+                <div><p class="text-xs text-gray-500">Comisión (${parseFloat(contract.agent_commission || 5)}%)</p><p class="font-bold text-lg text-purple-600">${AppUtils.formatCurrency(commission)}</p></div>
             </div>
             
             <div class="border-t border-b py-3">
                 <div class="flex justify-between items-center">
                     <span class="font-semibold">Total a pagar (con comisión):</span>
-                    <span class="font-bold text-xl text-blue-600">${UI.formatCurrency(totalWithCommission)}</span>
+                    <span class="font-bold text-xl text-blue-600">${AppUtils.formatCurrency(totalWithCommission)}</span>
                 </div>
             </div>
             
             <div class="text-sm space-y-2">
                 <p class="flex items-center gap-2"><i class="fas fa-calendar text-gray-400 w-4"></i><span class="text-gray-600">Próximo aumento:</span><span class="font-medium">${nextIncreaseDate}</span></p>
                 <p class="flex items-center gap-2"><i class="fas fa-info-circle text-gray-400 w-4"></i><span class="text-gray-600">Detalle:</span><span class="font-medium">${increaseDescription}</span></p>
-                ${contract.property_address ? `<p class="flex items-center gap-2"><i class="fas fa-map-marker-alt text-gray-400 w-4"></i><span class="text-gray-600">Propiedad:</span><span class="font-medium">${escapeHtml(contract.property_address)}</span></p>` : ''}
+                ${contract.property_address ? `<p class="flex items-center gap-2"><i class="fas fa-map-marker-alt text-gray-400 w-4"></i><span class="text-gray-600">Propiedad:</span><span class="font-medium">${AppUtils.escapeHtml(contract.property_address)}</span></p>` : ''}
             </div>
             
             ${indicesHtml}
@@ -836,7 +1002,7 @@ function aplicarAumento(contractId, newAmount) {
     
     UI.confirm({
         title: 'Aplicar Aumento',
-        message: `¿Estás seguro de aplicar el aumento a ${contract.tenant_name}? El monto pasará de ${UI.formatCurrency(contract.base_amount)} a ${UI.formatCurrency(newAmount)}.`,
+        message: `¿Estás seguro de aplicar el aumento a ${contract.tenant_name}? El monto pasará de ${AppUtils.formatCurrency(contract.base_amount)} a ${AppUtils.formatCurrency(newAmount)}.`,
         type: 'warning',
         confirmText: 'Aplicar',
         onConfirm: async () => {
@@ -844,7 +1010,9 @@ function aplicarAumento(contractId, newAmount) {
                 await API.updateContract({
                     id: contract.id,
                     tenantId: contract.tenant_id,
+                    ownerId: contract.owner_id,
                     owner: contract.owner,
+                    propertyId: contract.property_id,
                     propertyAddress: contract.property_address,
                     baseAmount: newAmount,
                     duration: contract.duration,
@@ -864,20 +1032,6 @@ function aplicarAumento(contractId, newAmount) {
             }
         }
     });
-}
-
-// ============================================
-// FUNCIONES AUXILIARES
-// ============================================
-
-function escapeHtml(text) {
-    if (!text) return '';
-    return String(text)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
 }
 
 // ============================================
@@ -911,14 +1065,14 @@ function verReciboProfesional() {
             <div class="grid grid-cols-2 gap-6 mb-6">
                 <div class="bg-gray-50 p-4 rounded-lg">
                     <h2 class="font-semibold text-gray-700 mb-3">Datos del Inquilino</h2>
-                    <p><span class="text-gray-500">Nombre:</span> ${escapeHtml(contract.tenant_name || 'N/A')}</p>
-                    <p><span class="text-gray-500">Email:</span> ${escapeHtml(contract.tenant_email || 'N/A')}</p>
-                    <p><span class="text-gray-500">Documento:</span> ${escapeHtml(contract.tenant_dni || 'N/A')}</p>
+                    <p><span class="text-gray-500">Nombre:</span> ${AppUtils.escapeHtml(contract.tenant_name || 'N/A')}</p>
+                    <p><span class="text-gray-500">Email:</span> ${AppUtils.escapeHtml(contract.tenant_email || 'N/A')}</p>
+                    <p><span class="text-gray-500">Documento:</span> ${AppUtils.escapeHtml(contract.tenant_dni || 'N/A')}</p>
                 </div>
                 <div class="bg-gray-50 p-4 rounded-lg">
                     <h2 class="font-semibold text-gray-700 mb-3">Datos del Inmueble</h2>
-                    <p><span class="text-gray-500">Propietario:</span> ${escapeHtml(contract.owner || 'N/A')}</p>
-                    <p><span class="text-gray-500">Dirección:</span> ${escapeHtml(contract.property_address || 'N/A')}</p>
+                    <p><span class="text-gray-500">Propietario:</span> ${AppUtils.escapeHtml(contract.owner || 'N/A')}</p>
+                    <p><span class="text-gray-500">Dirección:</span> ${AppUtils.escapeHtml(contract.property_address || 'N/A')}</p>
                     <p><span class="text-gray-500">Contrato N°:</span> ${contract.id}</p>
                 </div>
             </div>
@@ -926,7 +1080,7 @@ function verReciboProfesional() {
             <div class="bg-gray-50 p-4 rounded-lg mb-6">
                 <h2 class="font-semibold text-gray-700 mb-3">📈 Información del Aumento</h2>
                 <div class="grid grid-cols-2 gap-4 text-sm">
-                    <div><p><span class="text-gray-500">Fecha de referencia:</span></p><p class="font-medium">${contract.reference_date ? UI.formatDate(contract.reference_date) : UI.formatDate(contract.start_date)}</p></div>
+                    <div><p><span class="text-gray-500">Fecha de referencia:</span></p><p class="font-medium">${contract.reference_date ? AppUtils.formatDate(contract.reference_date) : AppUtils.formatDate(contract.start_date)}</p></div>
                     <div><p><span class="text-gray-500">Meses acumulados:</span></p><p class="font-medium">${calcularMesesDesdeUltimoAumento(contract)} meses</p></div>
                 </div>
             </div>
@@ -936,12 +1090,12 @@ function verReciboProfesional() {
                 <table class="w-full">
                     <thead class="bg-gray-100"><tr><th class="px-4 py-2 text-left text-sm font-medium text-gray-600">Concepto</th><th class="px-4 py-2 text-right text-sm font-medium text-gray-600">Importe</th></tr></thead>
                     <tbody class="divide-y">
-                        <tr><td class="px-4 py-3">Monto actual</td><td class="px-4 py-3 text-right">${UI.formatCurrency(calculation.baseAmount)}</td></tr>
+                        <tr><td class="px-4 py-3">Monto actual</td><td class="px-4 py-3 text-right">${AppUtils.formatCurrency(calculation.baseAmount)}</td></tr>
                         <tr><td class="px-4 py-3">Tipo de aumento</td><td class="px-4 py-3 text-right capitalize">${calculation.increaseDescription}</td></tr>
                         <tr><td class="px-4 py-3">Porcentaje de aumento</td><td class="px-4 py-3 text-right text-blue-600 font-medium">+${calculation.increasePercentage}%</td></tr>
-                        <tr><td class="px-4 py-3">Nuevo monto</td><td class="px-4 py-3 text-right text-green-600 font-bold">${UI.formatCurrency(calculation.newAmount)}</td></tr>
+                        <tr><td class="px-4 py-3">Nuevo monto</td><td class="px-4 py-3 text-right text-green-600 font-bold">${AppUtils.formatCurrency(calculation.newAmount)}</td></tr>
                     </tbody>
-                    <tfoot class="bg-gray-50"><tr><td class="px-4 py-3 font-bold">TOTAL A PAGAR</td><td class="px-4 py-3 text-right font-bold text-xl text-blue-600">${UI.formatCurrency(calculation.newAmount)}</td></tr></tfoot>
+                    <tfoot class="bg-gray-50"><tr><td class="px-4 py-3 font-bold">TOTAL A PAGAR</td><td class="px-4 py-3 text-right font-bold text-xl text-blue-600">${AppUtils.formatCurrency(calculation.newAmount)}</td></tr></tfoot>
                 </table>
             </div>
             
@@ -1003,11 +1157,11 @@ function descargarPDF() {
         doc.text(`Dirección: ${contract.property_address || 'N/A'}`, 14, 88);
         
         const tableRows = [
-            ["Monto actual", `$${calculation.baseAmount.toLocaleString()}`],
+            ["Monto actual", AppUtils.formatCurrency(calculation.baseAmount)],
             ["Tipo de aumento", calculation.increaseDescription],
             ["Porcentaje", `+${calculation.increasePercentage}%`],
-            ["Nuevo monto", `$${calculation.newAmount.toLocaleString()}`],
-            ["TOTAL A PAGAR", `$${calculation.newAmount.toLocaleString()}`]
+            ["Nuevo monto", AppUtils.formatCurrency(calculation.newAmount)],
+            ["TOTAL A PAGAR", AppUtils.formatCurrency(calculation.newAmount)]
         ];
         
         doc.autoTable({
@@ -1047,30 +1201,23 @@ function enviarReciboEmail() {
         return;
     }
     
-    // Generar el contenido del email
     const subject = `Actualización de Contrato - Nuevo Monto de Alquiler - Contrato #${contract.id}`;
     const body = generarTextoAumento(contract, calculation);
     
-    // Codificar para URL
     const encodedSubject = encodeURIComponent(subject);
     const encodedBody = encodeURIComponent(body);
     
-    // Detectar si es dispositivo móvil
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     
     let mailtoLink;
     
     if (isMobile) {
-        // En móvil: usar intent de Gmail app
         mailtoLink = `intent://mailto:${tenantEmail}?subject=${encodedSubject}&body=${encodedBody}#Intent;scheme=mailto;package=com.google.android.gm;end`;
     } else {
-        // En computadora: usar Gmail web
         mailtoLink = `https://mail.google.com/mail/?view=cm&fs=1&to=${tenantEmail}&su=${encodedSubject}&body=${encodedBody}`;
     }
     
-    // Abrir el enlace
     window.open(mailtoLink, '_blank');
-    
     UI.toast('Abriendo Gmail para enviar el recibo al inquilino...', 'info');
 }
 
@@ -1082,22 +1229,22 @@ function generarTextoAumento(contract, calculation) {
     fechaVencimiento.setDate(fechaVencimiento.getDate() + 15);
     
     let text = `========================================\n`;
-    text = `📄 NOTIFICACIÓN DE ACTUALIZACIÓN DE CONTRATO\n`;
+    text += `📄 NOTIFICACIÓN DE ACTUALIZACIÓN DE CONTRATO\n`;
     text += `========================================\n\n`;
-    text += `👤 INQUILINO: ${contract.tenant_name || 'N/A'}\n`;
+    text += `👤 INQUILINO: ${AppUtils.escapeHtml(contract.tenant_name || 'N/A')}\n`;
     text += `📅 FECHA: ${fecha}\n\n`;
     text += `========================================\n`;
     text += `📊 DETALLE DEL AUMENTO\n`;
     text += `========================================\n\n`;
-    text += `🏠 PROPIEDAD: ${contract.property_address || 'No especificada'}\n`;
-    text += `👤 PROPIETARIO: ${contract.owner || 'N/A'}\n`;
-    text += `💰 MONTO ACTUAL: $${Number(calculation.baseAmount || 0).toLocaleString()}\n`;
+    text += `🏠 PROPIEDAD: ${AppUtils.escapeHtml(contract.property_address || 'No especificada')}\n`;
+    text += `👤 PROPIETARIO: ${AppUtils.escapeHtml(contract.owner || 'N/A')}\n`;
+    text += `💰 MONTO ACTUAL: ${AppUtils.formatCurrency(calculation.baseAmount || 0)}\n`;
     text += `📈 PORCENTAJE DE AUMENTO: +${calculation.increasePercentage}%\n`;
-    text += `💵 NUEVO MONTO: $${Number(calculation.newAmount || 0).toLocaleString()}\n`;
+    text += `💵 NUEVO MONTO: ${AppUtils.formatCurrency(calculation.newAmount || 0)}\n`;
     if (calculation.commission) {
-        text += `💸 COMISIÓN (${contract.agent_commission}%): $${Number(calculation.commission || 0).toLocaleString()}\n`;
+        text += `💸 COMISIÓN (${contract.agent_commission}%): ${AppUtils.formatCurrency(calculation.commission || 0)}\n`;
     }
-    text += `💰 TOTAL A PAGAR: $${Number(calculation.totalWithCommission || calculation.newAmount || 0).toLocaleString()}\n\n`;
+    text += `💰 TOTAL A PAGAR: ${AppUtils.formatCurrency(calculation.totalWithCommission || calculation.newAmount || 0)}\n\n`;
     text += `========================================\n`;
     text += `📅 FECHAS IMPORTANTES\n`;
     text += `========================================\n`;
@@ -1114,11 +1261,172 @@ function generarTextoAumento(contract, calculation) {
     return text;
 }
 
-// Escuchar cambios en los índices
 window.addEventListener('indicesActualizados', () => {
     console.log('🔄 Índices actualizados, recargando...');
     cargarIndices();
 });
+
+// ============================================
+// GESTIÓN DE ARCHIVOS DE CONTRATOS
+// ============================================
+
+async function subirArchivoCloudinary(file, contractId) {
+    return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('upload_preset', 'tenant_crm');
+        formData.append('folder', `contratos/${contractId}`);
+        
+        fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/upload`, {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.secure_url) {
+                return fetch('/.netlify/functions/upload-file', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': sessionStorage.getItem('authToken')
+                    },
+                    body: JSON.stringify({
+                        contract_id: contractId,
+                        file_url: data.secure_url,
+                        file_name: file.name,
+                        file_type: file.type,
+                        file_size: file.size
+                    })
+                });
+            }
+            throw new Error('Error al subir a Cloudinary');
+        })
+        .then(response => response.json())
+        .then(data => resolve(data))
+        .catch(err => reject(err));
+    });
+}
+
+async function cargarArchivosContrato(contractId) {
+    try {
+        const token = sessionStorage.getItem('authToken');
+        const response = await fetch(`/.netlify/functions/upload-file?contract_id=${contractId}`, {
+            headers: { 'Authorization': token }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (Array.isArray(data)) {
+            currentContractFiles = data;
+            mostrarArchivos(data);
+        } else {
+            console.warn('La respuesta no es un array:', data);
+            currentContractFiles = [];
+            mostrarArchivos([]);
+        }
+        
+    } catch (error) {
+        console.error('Error cargando archivos:', error);
+        currentContractFiles = [];
+        mostrarArchivos([]);
+    }
+}
+
+function mostrarArchivos(archivos) {
+    const container = document.getElementById('fileList');
+    if (!container) return;
+    
+    if (!Array.isArray(archivos)) {
+        console.warn('archivos no es un array:', archivos);
+        archivos = [];
+    }
+    
+    if (archivos.length === 0) {
+        container.innerHTML = `
+            <div class="text-center text-gray-400 col-span-full py-4" id="noFilesMsg">
+                <i class="fas fa-file-alt text-3xl mb-2 opacity-50"></i>
+                <p class="text-sm">No hay documentos adjuntos</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = archivos.map(file => `
+        <div class="border rounded-lg p-2 relative group bg-white">
+            ${file.file_type && file.file_type.includes('image') ? 
+                `<img src="${file.file_url}" class="h-20 w-full object-cover rounded" alt="${AppUtils.escapeHtml(file.file_name)}">` :
+                `<div class="h-20 bg-gray-100 rounded flex flex-col items-center justify-center">
+                    <i class="fas ${file.file_name?.toLowerCase().includes('.pdf') ? 'fa-file-pdf text-red-500' : 'fa-file-alt text-blue-500'} text-3xl"></i>
+                    <span class="text-xs mt-1 truncate w-full px-1">${AppUtils.escapeHtml(file.file_name?.substring(0, 15) || 'Archivo')}</span>
+                 </div>`
+            }
+            <button onclick="eliminarArchivo(${file.id})" 
+                    class="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    `).join('');
+}
+
+async function eliminarArchivo(fileId) {
+    if (!confirm('¿Eliminar este documento?')) return;
+    
+    try {
+        const token = sessionStorage.getItem('authToken');
+        await fetch('/.netlify/functions/upload-file', {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': token
+            },
+            body: JSON.stringify({ file_id: fileId })
+        });
+        
+        UI.toast('Documento eliminado', 'success');
+        if (currentReceiptData?.contract?.id) {
+            await cargarArchivosContrato(currentReceiptData.contract.id);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        UI.toast('Error al eliminar', 'error');
+    }
+}
+
+function initFileUpload(contractId) {
+    const uploadBtn = document.getElementById('uploadFileBtn');
+    const fileInput = document.getElementById('fileInput');
+    
+    if (!uploadBtn || !fileInput) return;
+    
+    uploadBtn.addEventListener('click', () => {
+        fileInput.click();
+    });
+    
+    fileInput.addEventListener('change', async (e) => {
+        const files = Array.from(e.target.files);
+        
+        if (files.length === 0) return;
+        
+        UI.toast(`Subiendo ${files.length} archivo(s)...`, 'info');
+        
+        for (const file of files) {
+            try {
+                await subirArchivoCloudinary(file, contractId);
+                UI.toast(`${AppUtils.escapeHtml(file.name)} subido`, 'success');
+            } catch (error) {
+                UI.toast(`Error al subir ${AppUtils.escapeHtml(file.name)}`, 'error');
+            }
+        }
+        
+        fileInput.value = '';
+        await cargarArchivosContrato(contractId);
+    });
+}
+
 // ============================================
 // FUNCIONES GLOBALES
 // ============================================
@@ -1148,177 +1456,7 @@ window.cerrarRecibo = cerrarRecibo;
 window.imprimirRecibo = imprimirRecibo;
 window.descargarPDF = descargarPDF;
 window.enviarReciboEmail = enviarReciboEmail;
-
-// ============================================
-// GESTIÓN DE ARCHIVOS DE CONTRATOS
-// ============================================
-
-let currentContractFiles = [];
-let cloudinaryCloudName = 'dwapdg9aq'; // Reemplaza con tu cloud_name
-
-// Subir archivo a Cloudinary
-async function subirArchivoCloudinary(file, contractId) {
-    return new Promise((resolve, reject) => {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('upload_preset', 'tenant_crm');
-        formData.append('folder', `contratos/${contractId}`);
-        
-        fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/upload`, {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.secure_url) {
-                // Guardar referencia en la base de datos
-                return fetch('/.netlify/functions/upload-file', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': localStorage.getItem('authToken')
-                    },
-                    body: JSON.stringify({
-                        contract_id: contractId,
-                        file_url: data.secure_url,
-                        file_name: file.name,
-                        file_type: file.type,
-                        file_size: file.size
-                    })
-                });
-            }
-            throw new Error('Error al subir a Cloudinary');
-        })
-        .then(response => response.json())
-        .then(data => resolve(data))
-        .catch(err => reject(err));
-    });
-}
-
-// Cargar archivos de un contrato
-async function cargarArchivosContrato(contractId) {
-    try {
-        const token = localStorage.getItem('authToken');
-        const response = await fetch(`/.netlify/functions/upload-file?contract_id=${contractId}`, {
-            headers: { 'Authorization': token }
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
-        
-        const data = await response.json();
-        
-        // Asegurarse de que data sea un array
-        if (Array.isArray(data)) {
-            currentContractFiles = data;
-            mostrarArchivos(data);
-        } else {
-            console.warn('La respuesta no es un array:', data);
-            currentContractFiles = [];
-            mostrarArchivos([]);
-        }
-        
-    } catch (error) {
-        console.error('Error cargando archivos:', error);
-        currentContractFiles = [];
-        mostrarArchivos([]);
-    }
-}
-
-// Mostrar archivos en el modal
-function mostrarArchivos(archivos) {
-    const container = document.getElementById('fileList');
-    if (!container) return;
-    
-    // Asegurarse de que archivos sea un array
-    if (!Array.isArray(archivos)) {
-        console.warn('archivos no es un array:', archivos);
-        archivos = [];
-    }
-    
-    if (archivos.length === 0) {
-        container.innerHTML = `
-            <div class="text-center text-gray-400 col-span-full py-4" id="noFilesMsg">
-                <i class="fas fa-file-alt text-3xl mb-2 opacity-50"></i>
-                <p class="text-sm">No hay documentos adjuntos</p>
-            </div>
-        `;
-        return;
-    }
-    
-    container.innerHTML = archivos.map(file => `
-        <div class="border rounded-lg p-2 relative group bg-white">
-            ${file.file_type && file.file_type.includes('image') ? 
-                `<img src="${file.file_url}" class="h-20 w-full object-cover rounded" alt="${escapeHtml(file.file_name)}">` :
-                `<div class="h-20 bg-gray-100 rounded flex flex-col items-center justify-center">
-                    <i class="fas ${file.file_name?.toLowerCase().includes('.pdf') ? 'fa-file-pdf text-red-500' : 'fa-file-alt text-blue-500'} text-3xl"></i>
-                    <span class="text-xs mt-1 truncate w-full px-1">${escapeHtml(file.file_name?.substring(0, 15) || 'Archivo')}</span>
-                 </div>`
-            }
-            <button onclick="eliminarArchivo(${file.id})" 
-                    class="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-    `).join('');
-}
-
-// Eliminar archivo
-async function eliminarArchivo(fileId) {
-    if (!confirm('¿Eliminar este documento?')) return;
-    
-    try {
-        const token = localStorage.getItem('authToken');
-        await fetch('/.netlify/functions/upload-file', {
-            method: 'DELETE',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': token
-            },
-            body: JSON.stringify({ file_id: fileId })
-        });
-        
-        UI.toast('Documento eliminado', 'success');
-        if (currentReceiptData?.contract?.id) {
-            await cargarArchivosContrato(currentReceiptData.contract.id);
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        UI.toast('Error al eliminar', 'error');
-    }
-}
-
-// Inicializar upload de archivos
-function initFileUpload(contractId) {
-    const uploadBtn = document.getElementById('uploadFileBtn');
-    const fileInput = document.getElementById('fileInput');
-    
-    if (!uploadBtn || !fileInput) return;
-    
-    uploadBtn.addEventListener('click', () => {
-        fileInput.click();
-    });
-    
-    fileInput.addEventListener('change', async (e) => {
-        const files = Array.from(e.target.files);
-        
-        if (files.length === 0) return;
-        
-        UI.toast(`Subiendo ${files.length} archivo(s)...`, 'info');
-        
-        for (const file of files) {
-            try {
-                await subirArchivoCloudinary(file, contractId);
-                UI.toast(`${file.name} subido`, 'success');
-            } catch (error) {
-                UI.toast(`Error al subir ${file.name}`, 'error');
-            }
-        }
-        
-        fileInput.value = '';
-        await cargarArchivosContrato(contractId);
-    });
-}
+window.eliminarArchivo = eliminarArchivo;
+window.irPaginaContracts = irPaginaContracts;
 
 console.log('✅ Funciones de contratos configuradas correctamente');

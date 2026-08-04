@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+    <title>Registrarse - Tenant CRM</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="/js/tailwind-config.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/css/style.css">
+    <!-- Netlify Identity Widget -->
+    <script src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
+    <!-- PWA Meta Tags -->
+    <link rel="icon" type="image/png" href="/icons/icon-192x192.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Tenant CRM">
+    <meta name="theme-color" content="#4f46e5">
+    <meta name="mobile-web-app-capable" content="yes">
+    <!-- iOS Icons -->
+    <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192x192.png">
+    <link rel="apple-touch-icon" sizes="167x167" href="/icons/icon-192x192.png">
+    <!-- Windows Tiles -->
+    <meta name="msapplication-TileColor" content="#4f46e5">
+    <meta name="msapplication-TileImage" content="/icons/icon-144x144.png">
+</head>
+<body class="bg-gradient-to-br from-surface-dark to-slate-900 min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
+    <!-- Background Decor -->
+    <div class="absolute top-0 right-0 w-[500px] h-[500px] bg-primary-600/20 rounded-full mix-blend-screen filter blur-[100px] opacity-50 animate-pulse-slow"></div>
+    <div class="absolute bottom-0 left-0 w-[500px] h-[500px] bg-purple-600/20 rounded-full mix-blend-screen filter blur-[100px] opacity-50 animate-pulse-slow" style="animation-delay: 1.5s"></div>
+
+    <div class="max-w-md w-full space-y-8 glass-card p-10 rounded-3xl shadow-2xl animate-fade-in relative z-10">
+        <div class="text-center">
+            <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-purple-600 mb-4 shadow-neon">
+                <i class="fas fa-building text-2xl text-white"></i>
+            </div>
+            <h1 class="text-3xl font-display font-bold text-white mb-2 tracking-tight">Crear cuenta</h1>
+            <p class="text-slate-400 text-sm font-medium">Regístrate para usar Tenant CRM</p>
+        </div>
+        
+        <!-- ===== REGISTRO CON NETLIFY IDENTITY ===== -->
+        <div class="mt-8">
+            <button id="netlifyRegisterBtn" 
+                    class="w-full bg-gradient-to-r from-primary-600 to-primary-500 text-white py-3.5 px-4 rounded-xl hover:from-primary-500 hover:to-primary-400 transition-all text-base font-semibold flex justify-center items-center gap-2">
+                <i class="fas fa-user-plus"></i>
+                Registrarse con Netlify
+            </button>
+            
+            <div class="relative my-6">
+                <div class="absolute inset-0 flex items-center">
+                    <div class="w-full border-t border-slate-700/50"></div>
+                </div>
+                <div class="relative flex justify-center text-sm">
+                    <span class="px-4 bg-slate-800 text-slate-400">o</span>
+                </div>
+            </div>
+
+            <!-- Usuarios de prueba -->
+            <div class="mt-4 text-xs text-center text-slate-400 border-t border-slate-700/50 pt-4">
+                <p class="mb-1 text-slate-500 font-medium">Usuarios de prueba:</p>
+                <p><span class="font-mono text-white bg-slate-800/50 px-2 py-0.5 rounded">admin</span> / <span class="font-mono text-white bg-slate-800/50 px-2 py-0.5 rounded">admin123</span></p>
+                <p><span class="font-mono text-white bg-slate-800/50 px-2 py-0.5 rounded">agente</span> / <span class="font-mono text-white bg-slate-800/50 px-2 py-0.5 rounded">agente123</span></p>
+                <p><span class="font-mono text-white bg-slate-800/50 px-2 py-0.5 rounded">visualizador</span> / <span class="font-mono text-white bg-slate-800/50 px-2 py-0.5 rounded">visualizador123</span></p>
+            </div>
+            
+            <div class="text-center text-sm text-slate-400 mt-4">
+                ¿Ya tienes cuenta? <a href="/login.html" class="text-primary-400 hover:text-primary-300 transition-colors">Inicia sesión</a>
+            </div>
+            
+            <div class="mt-4 p-4 bg-slate-800/30 rounded-lg border border-slate-700/30">
+                <p class="text-xs text-slate-400 text-center">
+                    <i class="fas fa-info-circle mr-1"></i>
+                    Al registrarte, recibirás un email de confirmación. 
+                    Tu cuenta debe ser aprobada por un administrador.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // ===== INICIALIZAR NETLIFY IDENTITY =====
+            if (window.netlifyIdentity) {
+                window.netlifyIdentity.init({
+                    locale: 'es'
+                });
+
+                // Botón de registro
+                document.getElementById('netlifyRegisterBtn').addEventListener('click', function() {
+                    window.netlifyIdentity.open('signup');
+                });
+
+                // Escuchar eventos de autenticación
+                window.netlifyIdentity.on('login', function(user) {
+                    console.log('Usuario registrado con Netlify Identity:', user);
+                    
+                    // Obtener el rol del usuario desde los metadatos
+                    const role = user.user_metadata?.role || 'viewer';
+                    const userName = user.user_metadata?.full_name || user.email || 'Usuario';
+                    
+                    const userData = {
+                        username: user.email,
+                        name: userName,
+                        role: role,
+                        netlify_id: user.id,
+                        email: user.email
+                    };
+                    
+                    sessionStorage.setItem('authToken', 'netlify-' + (user.token?.access_token || 'demo'));
+                    sessionStorage.setItem('user', JSON.stringify(userData));
+                    sessionStorage.setItem('netlify_user', JSON.stringify(user));
+                    
+                    // Redirigir al dashboard
+                    window.location.href = '/dashboard.html';
+                });
+
+                window.netlifyIdentity.on('logout', function() {
+                    console.log('Usuario desconectado de Netlify Identity');
+                    sessionStorage.removeItem('authToken');
+                    sessionStorage.removeItem('user');
+                    sessionStorage.removeItem('netlify_user');
+                });
+
+                // Verificar si el usuario ya está logueado
+                const currentUser = window.netlifyIdentity.currentUser();
+                if (currentUser) {
+                    console.log('Usuario de Netlify Identity ya logueado:', currentUser);
+                    window.netlifyIdentity.emit('login', currentUser);
+                }
+            } else {
+                console.warn('Netlify Identity no está disponible');
+            }
+        });
+    </script>
+
+    <script src="/js/shared/utils.js"></script>
+    <script src="/js/ui.js"></script>
+</body>
+</html>

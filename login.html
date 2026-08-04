@@ -12,28 +12,31 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/css/style.css">
     <!-- PWA Meta Tags -->
-<link rel="icon" type="image/png" href="/icons/icon-192x192.png">
-<link rel="manifest" href="/site.webmanifest">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Tenant CRM">
-<meta name="theme-color" content="#4f46e5">
-<meta name="mobile-web-app-capable" content="yes">
-
-<!-- iOS Icons -->
-<link rel="apple-touch-icon" href="/icons/icon-192x192.png">
-<link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png">
-<link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192x192.png">
-<link rel="apple-touch-icon" sizes="167x167" href="/icons/icon-192x192.png">
-
-<!-- Windows Tiles -->
-<meta name="msapplication-TileColor" content="#4f46e5">
-<meta name="msapplication-TileImage" content="/icons/icon-144x144.png">
+    <link rel="icon" type="image/png" href="/icons/icon-192x192.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Tenant CRM">
+    <meta name="theme-color" content="#4f46e5">
+    <meta name="mobile-web-app-capable" content="yes">
+    <!-- iOS Icons -->
+    <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192x192.png">
+    <link rel="apple-touch-icon" sizes="167x167" href="/icons/icon-192x192.png">
+    <!-- Windows Tiles -->
+    <meta name="msapplication-TileColor" content="#4f46e5">
+    <meta name="msapplication-TileImage" content="/icons/icon-144x144.png">
 </head>
 <body class="bg-gradient-to-br from-surface-dark to-slate-900 min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
     <!-- Background Decor -->
     <div class="absolute top-0 right-0 w-[500px] h-[500px] bg-primary-600/20 rounded-full mix-blend-screen filter blur-[100px] opacity-50 animate-pulse-slow"></div>
     <div class="absolute bottom-0 left-0 w-[500px] h-[500px] bg-purple-600/20 rounded-full mix-blend-screen filter blur-[100px] opacity-50 animate-pulse-slow" style="animation-delay: 1.5s"></div>
+
+    <!-- Botón Modo Oscuro (flotante) -->
+    <button id="darkModeToggle" class="fixed top-4 right-4 z-50 text-white/70 hover:text-white p-2 rounded-xl hover:bg-white/10 transition-all" aria-label="Alternar modo oscuro">
+        <i id="darkModeIcon" class="fas fa-moon text-xl"></i>
+    </button>
 
     <div class="max-w-md w-full space-y-8 glass-card p-10 rounded-3xl shadow-2xl animate-fade-in relative z-10">
         <div class="text-center">
@@ -53,6 +56,7 @@
                     <input type="text" id="username" name="username" required 
                            class="w-full px-5 py-3.5 bg-slate-800/40 border border-slate-700/50 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all text-base text-white placeholder-slate-500 hover:bg-slate-800/60"
                            placeholder="Ingresa tu usuario">
+                    <div class="field-error text-red-400 text-sm mt-1 hidden"></div>
                 </div>
                 <div class="group">
                     <label for="password" class="block text-sm font-medium text-slate-300 mb-1.5 ml-1 transition-colors group-focus-within:text-primary-400">
@@ -61,6 +65,7 @@
                     <input type="password" id="password" name="password" required 
                            class="w-full px-5 py-3.5 bg-slate-800/40 border border-slate-700/50 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all text-base text-white placeholder-slate-500 hover:bg-slate-800/60"
                            placeholder="Ingresa tu contraseña">
+                    <div class="field-error text-red-400 text-sm mt-1 hidden"></div>
                 </div>
             </div>
 
@@ -72,10 +77,34 @@
             </button>
         </form>
 
+        <!-- Usuarios de prueba -->
+        <div class="mt-6 text-xs text-center text-slate-400 border-t border-slate-700/50 pt-4">
+            <p class="mb-1 text-slate-500 font-medium">Usuarios de prueba:</p>
+            <p><span class="font-mono text-white bg-slate-800/50 px-2 py-0.5 rounded">admin</span> / <span class="font-mono text-white bg-slate-800/50 px-2 py-0.5 rounded">admin123</span> <span class="text-emerald-400 ml-1">(Administrador)</span></p>
+            <p><span class="font-mono text-white bg-slate-800/50 px-2 py-0.5 rounded">agente</span> / <span class="font-mono text-white bg-slate-800/50 px-2 py-0.5 rounded">agente123</span> <span class="text-blue-400 ml-1">(Agente)</span></p>
+            <p><span class="font-mono text-white bg-slate-800/50 px-2 py-0.5 rounded">visualizador</span> / <span class="font-mono text-white bg-slate-800/50 px-2 py-0.5 rounded">visualizador123</span> <span class="text-yellow-400 ml-1">(Visualizador)</span></p>
+        </div>
     </div>
 
+    <!-- ===== SCRIPTS ===== -->
+    <script src="/js/shared/utils.js"></script>
+    <script src="/js/shared/api-cache.js"></script>
+    <script src="/js/shared/sidebar.js"></script>
+    <script src="/js/ui.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/indices-config.js"></script>
+    <script src="/js/notifications.js"></script>
+    <script src="/js/push-notifications.js"></script>
+    <script src="/js/pwa.js"></script>
+
     <script>
+        // El login ahora usa AUTH.login (con roles)
         document.addEventListener('DOMContentLoaded', function() {
+            // Inicializar modo oscuro
+            if (window.UI && typeof UI.initDarkMode === 'function') {
+                UI.initDarkMode();
+            }
+
             const loginForm = document.getElementById('loginForm');
             const errorDiv = document.getElementById('errorMessage');
             
@@ -83,8 +112,35 @@
                 loginForm.addEventListener('submit', async function(e) {
                     e.preventDefault();
                     
-                    const username = document.getElementById('username').value;
-                    const password = document.getElementById('password').value;
+                    const usernameInput = document.getElementById('username');
+                    const passwordInput = document.getElementById('password');
+                    
+                    // Limpiar errores previos
+                    if (window.UI) {
+                        UI.clearAllFieldErrors(loginForm);
+                    }
+                    errorDiv.classList.add('hidden');
+                    
+                    let isValid = true;
+                    
+                    if (!usernameInput.value.trim()) {
+                        if (window.UI) {
+                            UI.showFieldError(usernameInput, 'El usuario es obligatorio');
+                        }
+                        isValid = false;
+                    }
+                    
+                    if (!passwordInput.value.trim()) {
+                        if (window.UI) {
+                            UI.showFieldError(passwordInput, 'La contraseña es obligatoria');
+                        }
+                        isValid = false;
+                    }
+                    
+                    if (!isValid) return;
+                    
+                    const username = usernameInput.value;
+                    const password = passwordInput.value;
                     
                     // Mostrar loading
                     const submitBtn = loginForm.querySelector('button[type="submit"]');
@@ -93,41 +149,44 @@
                     submitBtn.disabled = true;
                     
                     try {
-                        // Llamar a la función serverless
-                        const response = await fetch('/.netlify/functions/auth', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({ username, password })
-                        });
-                        
-                        const data = await response.json();
-                        
-                        if (data.success) {
-                            // Guardar datos de sesión
-                            localStorage.setItem('authToken', data.token);
-                            localStorage.setItem('user', JSON.stringify(data.user));
-                            
-                            // Redirigir al dashboard
-                            window.location.href = 'dashboard.html';
+                        // Usar AUTH.login en lugar de fetch
+                        if (window.AUTH && typeof window.AUTH.login === 'function') {
+                            const result = await window.AUTH.login(username, password);
+                            if (result.success) {
+                                window.location.href = '/dashboard.html';
+                            }
                         } else {
-                            errorDiv.textContent = data.message || 'Error al iniciar sesión';
-                            errorDiv.classList.remove('hidden');
+                            // Fallback: usar fetch (por si auth.js no se carga)
+                            const response = await fetch('/.netlify/functions/auth', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({ username, password })
+                            });
+                            
+                            const data = await response.json();
+                            
+                            if (data.success) {
+                                sessionStorage.setItem('authToken', data.token);
+                                sessionStorage.setItem('user', JSON.stringify(data.user));
+                                window.location.href = 'dashboard.html';
+                            } else {
+                                errorDiv.textContent = data.message || 'Error al iniciar sesión';
+                                errorDiv.classList.remove('hidden');
+                            }
                         }
                     } catch (error) {
                         console.error('Error:', error);
-                        errorDiv.textContent = 'Error de conexión. Intenta de nuevo.';
+                        errorDiv.textContent = error.message || 'Error de conexión. Intenta de nuevo.';
                         errorDiv.classList.remove('hidden');
                     } finally {
-                        // Restaurar botón
                         submitBtn.innerHTML = originalText;
                         submitBtn.disabled = false;
                     }
                 });
             }
         });
-        </script>
-        <script src="/js/pwa.js"></script>
+    </script>
 </body>
 </html>

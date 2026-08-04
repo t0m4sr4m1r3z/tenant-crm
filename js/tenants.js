@@ -1,17 +1,24 @@
-// tenants.js - Versión DEFINITIVA (nombres únicos)
-// API Client
+// tenants.js - Gestión de Inquilinos (Versión con permisos) – CORREGIDO
 const API = {
     baseUrl: '/.netlify/functions',
     
     async request(endpoint, options = {}) {
-        const token = localStorage.getItem('authToken');
-        
+        const token = sessionStorage.getItem('authToken');
+
+        const isGet = !options.method || options.method === 'GET';
+        if (isGet) {
+            const cached = window.APICache ? window.APICache.get(endpoint, options) : null;
+            if (cached) {
+                return cached;
+            }
+        }
+
         const headers = {
             'Content-Type': 'application/json',
             ...(token && { 'Authorization': token }),
             ...options.headers
         };
-        
+
         try {
             console.log(`🌐 Llamando a ${endpoint}...`);
             
@@ -23,8 +30,8 @@ const API = {
             console.log(`📡 Respuesta status:`, response.status);
             
             if (response.status === 401) {
-                localStorage.removeItem('authToken');
-                localStorage.removeItem('user');
+                sessionStorage.removeItem('authToken');
+                sessionStorage.removeItem('user');
                 if (window.UI) UI.toast('Sesión expirada', 'warning');
                 setTimeout(() => {
                     window.location.href = '/login.html';
@@ -40,6 +47,10 @@ const API = {
                 
                 if (!response.ok) {
                     throw new Error(data.error || data.message || 'Error en la petición');
+                }
+
+                if (isGet && window.APICache) {
+                    window.APICache.set(endpoint, data, options);
                 }
                 
                 return data;
@@ -83,74 +94,47 @@ const API = {
 // Estado de la aplicación
 let currentTenants = [];
 let searchTimeout = null;
+let currentPage = 1;
+const PAGE_SIZE = 10;
+let filteredTenants = [];
 
 // Inicialización
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('📄 Página de inquilinos cargada');
     
-    const token = localStorage.getItem('authToken');
+    const token = sessionStorage.getItem('authToken');
     if (!token) {
         window.location.href = '/login.html';
         return;
     }
     
-    if (!window.UI) {
-        window.UI = {
-            toast: (msg, type) => {
-                console.log(`${type}: ${msg}`);
-                alert(`${type.toUpperCase()}: ${msg}`);
-            },
-            confirm: (options) => {
-                if (confirm(options.message)) options.onConfirm();
-                else if (options.onCancel) options.onCancel();
-            },
-            showLoading: (id, msg) => {
-                const el = document.getElementById(id);
-                if (el) el.innerHTML = `<tr><td colspan="5" class="text-center py-4"><div class="spinner mx-auto mb-2"></div><p class="text-gray-500">${msg}</p></td></tr>`;
-            },
-            hideLoading: (id) => {},
-            validateEmail: (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email),
-            validatePhone: (phone) => /^[\d\s\+\-\(\)]{8,20}$/.test(phone)
-        };
-    }
-    
-    initSidebar();
+    AppSidebar.init();
     initTenantModal();
     initSearch();
+    
+    // Crear contenedor de paginación si no existe
+    if (!document.getElementById('tenantsPagination')) {
+        const tableContainer = document.querySelector('.bg-white.rounded-xl.shadow-sm.border.border-gray-100.overflow-hidden');
+        if (tableContainer) {
+            const paginationDiv = document.createElement('div');
+            paginationDiv.id = 'tenantsPagination';
+            paginationDiv.className = 'flex justify-between items-center px-6 py-3 bg-gray-50 border-t border-gray-200';
+            tableContainer.appendChild(paginationDiv);
+        }
+    }
+    
     await loadTenants();
     
     const addBtn = document.getElementById('addTenantBtn');
     if (addBtn) {
+        if (!AUTH.hasPermission('canCreate')) {
+            addBtn.style.display = 'none';
+        }
         addBtn.addEventListener('click', () => {
             abrirModalNuevoInquilinoInterno();
         });
     }
 });
-
-function initSidebar() {
-    const menuBtn = document.getElementById('menuBtn');
-    const sidebar = document.getElementById('sidebar');
-    const closeBtn = document.getElementById('closeSidebarBtn');
-    const overlay = document.getElementById('sidebarOverlay');
-    
-    if (menuBtn && sidebar) {
-        menuBtn.addEventListener('click', () => {
-            sidebar.classList.remove('hidden');
-        });
-    }
-    
-    if (closeBtn && sidebar) {
-        closeBtn.addEventListener('click', () => {
-            sidebar.classList.add('hidden');
-        });
-    }
-    
-    if (overlay && sidebar) {
-        overlay.addEventListener('click', () => {
-            sidebar.classList.add('hidden');
-        });
-    }
-}
 
 function initSearch() {
     const searchInput = document.getElementById('searchTenants');
@@ -198,6 +182,10 @@ function initTenantModal() {
     }
 }
 
+// ============================================
+// FUNCIONES DE PAGINACIÓN
+// ============================================
+
 async function loadTenants() {
     const tableBody = document.getElementById('tenantsTableBody');
     if (!tableBody) return;
@@ -209,14 +197,17 @@ async function loadTenants() {
         currentTenants = await API.getTenants();
         console.log('✅ Inquilinos recibidos:', currentTenants);
         
-        renderizarTabla(currentTenants);
+        filteredTenants = [...currentTenants];
+        currentPage = 1;
+        renderizarTenantsPaginado();
         actualizarEstadisticas();
         
     } catch (error) {
         console.error('❌ Error cargando inquilinos:', error);
         
         UI.toast('Error al cargar los inquilinos: ' + error.message, 'error');
-        
+        currentTenants = [];
+        filteredTenants = [];
         tableBody.innerHTML = `
             <tr>
                 <td colspan="5" class="px-6 py-8 text-center text-gray-500">
@@ -233,7 +224,18 @@ async function loadTenants() {
     }
 }
 
-function renderizarTabla(tenants) {
+function renderizarTenantsPaginado() {
+    const totalItems = filteredTenants.length;
+    const totalPages = Math.ceil(totalItems / PAGE_SIZE);
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    const pageItems = filteredTenants.slice(start, end);
+    
+    renderizarTablaTenants(pageItems);
+    renderPaginationTenants(totalItems, totalPages);
+}
+
+function renderizarTablaTenants(tenants) {
     const tableBody = document.getElementById('tenantsTableBody');
     if (!tableBody) return;
     
@@ -243,69 +245,111 @@ function renderizarTabla(tenants) {
                 <td colspan="5" class="px-6 py-8 text-center text-gray-500">
                     <i class="fas fa-users text-4xl mb-3 opacity-50"></i>
                     <p>No hay inquilinos registrados</p>
-                    <button onclick="abrirModalNuevoInquilinoGlobal()" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                    ${AUTH.hasPermission('canCreate') ? `<button onclick="abrirModalNuevoInquilinoGlobal()" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
                         <i class="fas fa-plus mr-1"></i>Crear el primero
-                    </button>
+                    </button>` : ''}
                 </td>
             </tr>
         `;
         return;
     }
     
+    const canEdit = AUTH.hasPermission('canEdit');
+    const canDelete = AUTH.hasPermission('canDelete');
+    
     tableBody.innerHTML = tenants.map(tenant => `
         <tr class="hover:bg-gray-50 transition">
-            <td class="px-6 py-4" data-label="DNI">${escapeHtml(tenant.dni)}</td>
-            <td class="px-6 py-4 font-medium" data-label="Nombre">${escapeHtml(tenant.name)}</td>
+            <td class="px-6 py-4" data-label="DNI">${AppUtils.escapeHtml(tenant.dni)}</td>
+            <td class="px-6 py-4 font-medium" data-label="Nombre">${AppUtils.escapeHtml(tenant.name)}</td>
             <td class="px-6 py-4" data-label="Email">
-                <a href="mailto:${escapeHtml(tenant.email)}" class="text-blue-600 hover:text-blue-800">
-                    ${escapeHtml(tenant.email)}
+                <a href="mailto:${AppUtils.escapeHtml(tenant.email)}" class="text-blue-600 hover:text-blue-800">
+                    ${AppUtils.escapeHtml(tenant.email)}
                 </a>
             </td>
             <td class="px-6 py-4" data-label="Teléfono">
-                ${tenant.phone ? escapeHtml(tenant.phone) : '-'}
+                ${tenant.phone ? AppUtils.escapeHtml(tenant.phone) : '-'}
             </td>
             <td class="px-6 py-4" data-label="Acciones">
                 <div class="flex gap-2">
-                    <button onclick="editarInquilinoGlobal(${tenant.id})" 
-                            class="text-blue-600 hover:text-blue-800 p-2 rounded-lg hover:bg-blue-50 transition"
-                            title="Editar inquilino">
-                        <i class="fas fa-edit"></i>
-                    </button>
-                    <button onclick="eliminarInquilinoGlobal(${tenant.id})" 
-                            class="text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-50 transition"
-                            title="Eliminar inquilino">
-                        <i class="fas fa-trash"></i>
-                    </button>
+                    ${canEdit ? `<button onclick="editarInquilinoGlobal(${tenant.id})" class="text-blue-600 hover:text-blue-800 p-2 rounded-lg hover:bg-blue-50 transition" title="Editar inquilino" data-action="edit"><i class="fas fa-edit"></i></button>` : ''}
+                    ${canDelete ? `<button onclick="eliminarInquilinoGlobal(${tenant.id})" class="text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-50 transition" title="Eliminar inquilino" data-action="delete"><i class="fas fa-trash"></i></button>` : ''}
                 </div>
             </td>
         </tr>
     `).join('');
 }
 
-function filtrarInquilinos(searchTerm) {
-    if (!searchTerm.trim()) {
-        renderizarTabla(currentTenants);
+function renderPaginationTenants(totalItems, totalPages) {
+    const container = document.getElementById('tenantsPagination');
+    if (!container) return;
+    
+    if (totalItems === 0) {
+        container.innerHTML = '';
         return;
     }
     
-    const term = searchTerm.toLowerCase().trim();
-    const filtered = currentTenants.filter(tenant => 
-        tenant.name.toLowerCase().includes(term) ||
-        tenant.dni.toLowerCase().includes(term) ||
-        tenant.email.toLowerCase().includes(term) ||
-        (tenant.phone && tenant.phone.includes(term))
-    );
+    const startItem = (currentPage - 1) * PAGE_SIZE + 1;
+    const endItem = Math.min(currentPage * PAGE_SIZE, totalItems);
     
-    renderizarTabla(filtered);
+    container.innerHTML = `
+        <div class="flex flex-wrap items-center justify-between gap-3 w-full">
+            <div class="text-sm text-gray-600">
+                Mostrando <span class="font-medium">${startItem}</span> - <span class="font-medium">${endItem}</span> de <span class="font-medium">${totalItems}</span> inquilinos
+            </div>
+            <div class="flex items-center gap-2">
+                <button onclick="irPaginaTenants(${currentPage - 1})" 
+                        class="px-3 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 transition ${currentPage === 1 ? 'opacity-50 cursor-not-allowed' : ''}"
+                        ${currentPage === 1 ? 'disabled' : ''}
+                        aria-label="Página anterior">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+                <span class="text-sm font-medium px-3 py-1 bg-blue-100 text-blue-700 rounded-lg">${currentPage} / ${totalPages}</span>
+                <button onclick="irPaginaTenants(${currentPage + 1})" 
+                        class="px-3 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 transition ${currentPage === totalPages ? 'opacity-50 cursor-not-allowed' : ''}"
+                        ${currentPage === totalPages ? 'disabled' : ''}
+                        aria-label="Página siguiente">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function irPaginaTenants(page) {
+    const totalPages = Math.ceil(filteredTenants.length / PAGE_SIZE);
+    if (page < 1 || page > totalPages) return;
+    currentPage = page;
+    renderizarTenantsPaginado();
+}
+
+// ============================================
+// BÚSQUEDA Y FILTROS
+// ============================================
+
+function filtrarInquilinos(searchTerm) {
+    if (!searchTerm.trim()) {
+        filteredTenants = [...currentTenants];
+    } else {
+        const term = searchTerm.toLowerCase().trim();
+        filteredTenants = currentTenants.filter(tenant => 
+            tenant.name.toLowerCase().includes(term) ||
+            tenant.dni.toLowerCase().includes(term) ||
+            tenant.email.toLowerCase().includes(term) ||
+            (tenant.phone && tenant.phone.includes(term))
+        );
+    }
     
-    if (filtered.length === 0) {
+    currentPage = 1;
+    renderizarTenantsPaginado();
+    
+    if (filteredTenants.length === 0) {
         const tableBody = document.getElementById('tenantsTableBody');
         if (tableBody) {
             tableBody.innerHTML = `
                 <tr>
                     <td colspan="5" class="px-6 py-8 text-center text-gray-500">
                         <i class="fas fa-search text-3xl mb-3 opacity-50"></i>
-                        <p>No se encontraron resultados para "${escapeHtml(searchTerm)}"</p>
+                        <p>No se encontraron resultados para "${AppUtils.escapeHtml(searchTerm)}"</p>
                         <button onclick="document.getElementById('searchTenants').value = ''; filtrarInquilinos('');" 
                                 class="mt-3 text-blue-600 hover:text-blue-800">
                             <i class="fas fa-times mr-1"></i>Limpiar búsqueda
@@ -313,12 +357,14 @@ function filtrarInquilinos(searchTerm) {
                     </td>
                 </tr>
             `;
+            const pagContainer = document.getElementById('tenantsPagination');
+            if (pagContainer) pagContainer.innerHTML = '';
         }
     }
 }
 
 // ============================================
-// FUNCIONES INTERNAS (con nombres únicos)
+// FUNCIONES INTERNAS
 // ============================================
 
 function abrirModalNuevoInquilinoInterno() {
@@ -369,22 +415,50 @@ function abrirModalEditarInquilinoInterno(tenantId) {
     modal.classList.remove('hidden');
 }
 
+// ============================================
+// GUARDAR INQUILINO CON VALIDACIONES MEJORADAS
+// ============================================
+
 async function guardarInquilino() {
+    const form = document.getElementById('tenantForm');
+    UI.clearAllFieldErrors(form);
+    
+    const dniInput = document.getElementById('tenantDni');
+    const nameInput = document.getElementById('tenantName');
+    const emailInput = document.getElementById('tenantEmail');
+    const phoneInput = document.getElementById('tenantPhone');
+    
+    let isValid = true;
+    
+    if (!UI.validateField(dniInput, null, null)) {
+        isValid = false;
+    }
+    
+    if (!UI.validateField(nameInput, null, null)) {
+        isValid = false;
+    }
+    
+    if (!UI.validateField(emailInput, UI.validateEmail, 'El email no es válido')) {
+        isValid = false;
+    }
+    
+    if (phoneInput.value.trim() && !UI.validatePhone(phoneInput.value.trim())) {
+        UI.showFieldError(phoneInput, 'El teléfono debe tener al menos 8 dígitos');
+        isValid = false;
+    }
+    
+    if (!isValid) return;
+    
     const tenantData = {
-        dni: document.getElementById('tenantDni').value.trim(),
-        name: document.getElementById('tenantName').value.trim(),
-        email: document.getElementById('tenantEmail').value.trim(),
-        phone: document.getElementById('tenantPhone').value.trim(),
+        dni: dniInput.value.trim(),
+        name: nameInput.value.trim(),
+        email: emailInput.value.trim(),
+        phone: phoneInput.value.trim(),
         address: document.getElementById('tenantAddress').value.trim()
     };
     
     const id = document.getElementById('tenantId').value;
     if (id) tenantData.id = parseInt(id);
-    
-    if (!tenantData.dni) return UI.toast('El DNI es obligatorio', 'warning');
-    if (!tenantData.name) return UI.toast('El nombre es obligatorio', 'warning');
-    if (!tenantData.email) return UI.toast('El email es obligatorio', 'warning');
-    if (!UI.validateEmail(tenantData.email)) return UI.toast('Email no válido', 'error');
     
     const submitBtn = document.querySelector('#tenantForm button[type="submit"]');
     const originalText = submitBtn.innerHTML;
@@ -438,18 +512,8 @@ function actualizarEstadisticas() {
     if (totalElement) totalElement.textContent = currentTenants.length;
 }
 
-function escapeHtml(text) {
-    if (!text) return '';
-    return String(text)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
-
 // ============================================
-// FUNCIONES GLOBALES (con nombres diferentes)
+// FUNCIONES GLOBALES
 // ============================================
 
 window.editarInquilinoGlobal = function(id) {
@@ -466,5 +530,7 @@ window.abrirModalNuevoInquilinoGlobal = function() {
     console.log('👆 abrirModalNuevoInquilinoGlobal llamado');
     abrirModalNuevoInquilinoInterno();
 };
+
+window.irPaginaTenants = irPaginaTenants;
 
 console.log('✅ Funciones globales configuradas correctamente');

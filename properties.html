@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>Propietarios - Tenant CRM</title>
+    <title>Propiedades - Tenant CRM</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,12 +11,6 @@
     <script src="/js/tailwind-config.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/css/style.css">
-
-    <!-- Librerías para exportar PDF y Excel -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
-
     <!-- PWA Meta Tags -->
     <link rel="icon" type="image/png" href="/icons/icon-192x192.png">
     <link rel="manifest" href="/site.webmanifest">
@@ -83,11 +77,11 @@
                     <li><a href="/tenants.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
                         <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-users"></i></div><span>Inquilinos</span>
                     </a></li>
-                    <li><a href="/owners.html" class="flex items-center p-3 bg-primary-50 text-primary-600 rounded-xl transition-colors">
-                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-primary-100 mr-2"><i class="fas fa-user-tie"></i></div><span>Propietarios</span>
+                    <li><a href="/owners.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-user-tie"></i></div><span>Propietarios</span>
                     </a></li>
-                    <li><a href="/properties.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
-                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-building"></i></div><span>Propiedades</span>
+                    <li><a href="/properties.html" class="flex items-center p-3 bg-primary-50 text-primary-600 rounded-xl transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-primary-100 mr-2"><i class="fas fa-building"></i></div><span>Propiedades</span>
                     </a></li>
                     <li><a href="/contracts.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
                         <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-file-contract"></i></div><span>Contratos</span>
@@ -113,119 +107,139 @@
     <main class="p-4 pb-20 max-w-7xl mx-auto animate-fade-in relative z-0">
         <!-- Header with Add Button -->
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-            <div class="relative w-full sm:w-64">
-                <i class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" aria-hidden="true"></i>
-                <input type="text" id="searchOwners" placeholder="Buscar propietarios..." 
-                       class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
+            <div>
+                <h2 class="text-2xl font-bold text-gray-800">🏢 Propiedades</h2>
+                <p class="text-gray-500 text-sm mt-1">Gestiona los inmuebles de tus propietarios</p>
             </div>
-            <button id="addOwnerBtn" class="w-full sm:w-auto bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 transition" data-action="create">
-                <i class="fas fa-plus" aria-hidden="true"></i>
-                <span>Nuevo Propietario</span>
-            </button>
+            <div class="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                <div class="relative flex-1 sm:flex-none">
+                    <i class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" aria-hidden="true"></i>
+                    <input type="text" id="searchProperties" placeholder="Buscar propiedades..." 
+                           class="w-full sm:w-64 pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
+                </div>
+                <button id="addPropertyBtn" class="w-full sm:w-auto bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 transition" data-action="create">
+                    <i class="fas fa-plus" aria-hidden="true"></i>
+                    <span>Nueva Propiedad</span>
+                </button>
+            </div>
         </div>
 
-        <!-- Propietarios Table -->
+        <!-- Properties Table -->
         <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div class="overflow-x-auto">
                 <table class="min-w-full divide-y divide-gray-200">
                     <thead class="bg-gray-50">
                         <tr>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nombre</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Teléfono</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contratos</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ingresos</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Dirección</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tipo</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Propietario</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Habitaciones</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Superficie (m²)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acciones</th>
                         </tr>
                     </thead>
-                    <tbody id="ownersTableBody" class="bg-white divide-y divide-gray-200">
-                        <tr><td colspan="6" class="text-center py-8">Cargando propietarios...</td></tr>
+                    <tbody id="propertiesTableBody" class="bg-white divide-y divide-gray-200">
+                        <tr><td colspan="7" class="text-center py-8">Cargando propiedades...</td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
     </main>
 
-    <!-- Add/Edit Owner Modal -->
-    <div id="ownerModal" class="fixed inset-0 z-30 hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <!-- Add/Edit Property Modal -->
+    <div id="propertyModal" class="fixed inset-0 z-30 hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
         <div class="absolute inset-0 bg-gray-600 bg-opacity-75"></div>
         <div class="absolute inset-0 flex items-center justify-center p-4">
-            <div class="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                 <div class="p-6">
-                    <h3 class="text-lg font-semibold mb-4" id="modalTitle">Nuevo Propietario</h3>
-                    <form id="ownerForm" class="space-y-4">
-                        <input type="hidden" id="ownerId">
+                    <h3 class="text-lg font-semibold mb-4" id="modalTitle">Nueva Propiedad</h3>
+                    <form id="propertyForm" class="space-y-4">
+                        <input type="hidden" id="propertyId">
+
+                        <!-- Dirección -->
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">DNI</label>
-                            <input type="text" id="ownerDni" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Nombre Completo</label>
-                            <input type="text" id="ownerName" required aria-required="true" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Dirección <span class="text-red-500">*</span></label>
+                            <input type="text" id="propertyAddress" required aria-required="true" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Calle y número">
                             <div class="field-error text-red-500 text-sm mt-1 hidden"></div>
                         </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Propietario -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Propietario <span class="text-red-500">*</span></label>
+                                <select id="propertyOwnerId" required aria-required="true" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                    <option value="">Seleccionar propietario...</option>
+                                </select>
+                                <div class="field-error text-red-500 text-sm mt-1 hidden"></div>
+                            </div>
+
+                            <!-- Tipo -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Tipo <span class="text-red-500">*</span></label>
+                                <select id="propertyType" required aria-required="true" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                    <option value="casa">Casa</option>
+                                    <option value="departamento">Departamento</option>
+                                    <option value="local_comercial">Local comercial</option>
+                                    <option value="oficina">Oficina</option>
+                                    <option value="terreno">Terreno</option>
+                                    <option value="otro">Otro</option>
+                                </select>
+                                <div class="field-error text-red-500 text-sm mt-1 hidden"></div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Habitaciones -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Habitaciones</label>
+                                <input type="number" id="propertyRooms" min="0" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="0">
+                            </div>
+
+                            <!-- Baños -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Baños</label>
+                                <input type="number" id="propertyBathrooms" min="0" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="0">
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Superficie Cubierta -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Superficie Cubierta (m²)</label>
+                                <input type="number" id="propertyCoveredArea" min="0" step="0.01" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="0.00">
+                            </div>
+
+                            <!-- Superficie Descubierta -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Superficie Descubierta (m²)</label>
+                                <input type="number" id="propertyUncoveredArea" min="0" step="0.01" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="0.00">
+                            </div>
+                        </div>
+
+                        <!-- Estado -->
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                            <input type="email" id="ownerEmail" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Estado <span class="text-red-500">*</span></label>
+                            <select id="propertyStatus" required aria-required="true" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                <option value="disponible">Disponible</option>
+                                <option value="alquilado">Alquilado</option>
+                                <option value="mantenimiento">En mantenimiento</option>
+                                <option value="vendido">Vendido</option>
+                            </select>
                             <div class="field-error text-red-500 text-sm mt-1 hidden"></div>
                         </div>
+
+                        <!-- Descripción -->
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Teléfono</label>
-                            <input type="tel" id="ownerPhone" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                            <div class="field-error text-red-500 text-sm mt-1 hidden"></div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
+                            <textarea id="propertyDescription" rows="2" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Descripción adicional..."></textarea>
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Dirección</label>
-                            <input type="text" id="ownerAddress" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Cuenta Bancaria (CBU/Alias)</label>
-                            <input type="text" id="ownerBankAccount" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Notas / Observaciones</label>
-                            <textarea id="ownerNotes" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" rows="2"></textarea>
-                        </div>
+
                         <div class="flex gap-3 pt-4">
                             <button type="button" id="closeModalBtn" class="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50" aria-label="Cancelar">Cancelar</button>
                             <button type="submit" class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Guardar</button>
                         </div>
                     </form>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal de Propiedades del Propietario -->
-    <div id="propertiesModal" class="fixed inset-0 z-50 hidden overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="modalOwnerName">
-        <div class="flex items-center justify-center min-h-screen p-4">
-            <div class="fixed inset-0 bg-gray-600 bg-opacity-75" onclick="closePropertiesModal()"></div>
-            <div class="relative bg-white rounded-xl shadow-xl max-w-6xl w-full max-h-[90vh] overflow-y-auto">
-                <div class="sticky top-0 bg-white px-6 py-4 border-b flex justify-between items-center">
-                    <h3 class="text-lg font-semibold" id="modalOwnerName">Propiedades de</h3>
-                    <div class="flex gap-2">
-                        <button onclick="imprimirPropiedades()" class="text-gray-600 hover:text-gray-800 px-3 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 transition" title="Imprimir" aria-label="Imprimir propiedades">
-                            <i class="fas fa-print"></i>
-                        </button>
-                        <button onclick="exportarPropiedadesPDF()" class="text-red-600 hover:text-red-800 px-3 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 transition" title="Exportar PDF" aria-label="Exportar a PDF">
-                            <i class="fas fa-file-pdf"></i>
-                        </button>
-                        <button onclick="exportarPropiedadesExcel()" class="text-green-600 hover:text-green-800 px-3 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 transition" title="Exportar Excel" aria-label="Exportar a Excel">
-                            <i class="fas fa-file-excel"></i>
-                        </button>
-                        <button onclick="enviarEmailPropietario()" class="text-blue-600 hover:text-blue-800 px-3 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 transition" title="Enviar Email al Propietario" aria-label="Enviar email al propietario">
-                            <i class="fas fa-envelope"></i>
-                        </button>
-                        <button onclick="closePropertiesModal()" class="text-gray-500 hover:text-gray-700 ml-2" aria-label="Cerrar modal de propiedades">
-                            <i class="fas fa-times text-xl"></i>
-                        </button>
-                    </div>
-                </div>
-                <div class="p-6" id="propertiesList">
-                    <div class="text-center py-8">
-                        <i class="fas fa-spinner fa-spin text-2xl"></i>
-                        <p class="mt-2">Cargando propiedades...</p>
-                    </div>
                 </div>
             </div>
         </div>
@@ -241,6 +255,6 @@
     <script src="/js/notifications.js"></script>
     <script src="/js/push-notifications.js"></script>
     <script src="/js/pwa.js"></script>
-    <script src="/js/owners.js"></script>
+    <script src="/js/properties.js"></script>
 </body>
 </html>

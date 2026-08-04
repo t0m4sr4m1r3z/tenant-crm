@@ -1,4 +1,4 @@
-// reports.js - Versión mejorada con informes completos
+// reports.js - Reportes y Estadísticas (Versión con AppUtils y Sidebar centralizado)
 let incomeChart = null;
 let distributionChart = null;
 let currentData = {
@@ -8,7 +8,6 @@ let currentData = {
     filteredContracts: []
 };
 
-// Configuración de fechas por defecto (últimos 30 días)
 const today = new Date();
 const thirtyDaysAgo = new Date();
 thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -16,21 +15,7 @@ thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('📊 Página de reportes cargada');
     
-    if (!window.UI) {
-        window.UI = {
-            toast: (msg, type) => alert(`${type}: ${msg}`),
-            formatCurrency: (amount) => {
-                if (amount === undefined || amount === null || isNaN(amount)) return '$0';
-                return `$${Number(amount).toLocaleString('es-AR', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2
-                })}`;
-            },
-            formatDate: (date) => new Date(date).toLocaleDateString('es-ES')
-        };
-    }
-    
-    const token = localStorage.getItem('authToken');
+    const token = sessionStorage.getItem('authToken');
     if (!token) {
         window.location.href = '/login.html';
         return;
@@ -43,35 +28,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     document.getElementById('fechaPie').textContent = today.toLocaleDateString('es-ES');
     
-    initSidebar();
+    AppSidebar.init();
     initEventListeners();
     await loadData();
 });
-
-function initSidebar() {
-    const menuBtn = document.getElementById('menuBtn');
-    const sidebar = document.getElementById('sidebar');
-    const closeBtn = document.getElementById('closeSidebarBtn');
-    const overlay = document.getElementById('sidebarOverlay');
-    
-    if (menuBtn && sidebar) {
-        menuBtn.addEventListener('click', () => {
-            sidebar.classList.remove('hidden');
-        });
-    }
-    
-    if (closeBtn && sidebar) {
-        closeBtn.addEventListener('click', () => {
-            sidebar.classList.add('hidden');
-        });
-    }
-    
-    if (overlay && sidebar) {
-        overlay.addEventListener('click', () => {
-            sidebar.classList.add('hidden');
-        });
-    }
-}
 
 function initEventListeners() {
     document.getElementById('applyFiltersBtn').addEventListener('click', aplicarFiltros);
@@ -80,7 +40,7 @@ function initEventListeners() {
 
 async function loadData() {
     try {
-        const token = localStorage.getItem('authToken');
+        const token = sessionStorage.getItem('authToken');
         
         const [tenants, contracts] = await Promise.all([
             fetch('/.netlify/functions/tenants', {
@@ -165,7 +125,6 @@ async function generarReporteCompleto() {
     await actualizarTablaAumentos();
     actualizarResumenEjecutivo();
     
-    // Cargar y agregar pagos
     const pagos = await cargarPagosReportes();
     agregarTablaPagos(pagos);
 }
@@ -221,16 +180,16 @@ async function actualizarKPIs() {
         return sum + commission;
     }, 0);
     
-    document.getElementById('totalIncome').textContent = UI.formatCurrency(totalIncome);
-    document.getElementById('avgContract').textContent = UI.formatCurrency(avgContract);
+    document.getElementById('totalIncome').textContent = AppUtils.formatCurrency(totalIncome);
+    document.getElementById('avgContract').textContent = AppUtils.formatCurrency(avgContract);
     document.getElementById('totalIncreases').textContent = totalIncreases;
-    document.getElementById('totalCommissions').textContent = UI.formatCurrency(totalCommissions);
+    document.getElementById('totalCommissions').textContent = AppUtils.formatCurrency(totalCommissions);
     
     const incomePeriod = document.getElementById('incomePeriod');
     if (incomePeriod) {
         incomePeriod.innerHTML = `
-            Pagado: ${UI.formatCurrency(totalPaidIncome)} | 
-            Pendiente: ${UI.formatCurrency(totalPendingIncome)}
+            Pagado: ${AppUtils.formatCurrency(totalPaidIncome)} | 
+            Pendiente: ${AppUtils.formatCurrency(totalPendingIncome)}
             ${totalPaidIncome === 0 ? '<span class="text-red-500 ml-2">(Sin pagos en este período)</span>' : ''}
         `;
     }
@@ -282,7 +241,7 @@ function actualizarGraficoIngresos() {
                 legend: { display: false },
                 tooltip: {
                     callbacks: {
-                        label: (context) => `Ingresos: ${UI.formatCurrency(context.raw)}`
+                        label: (context) => `Ingresos: ${AppUtils.formatCurrency(context.raw)}`
                     }
                 }
             }
@@ -384,13 +343,13 @@ async function actualizarTablaIngresos() {
         
         return `
             <tr>
-                <td class="px-4 py-2">${UI.formatDate(c.created_at)}</td>
-                <td class="px-4 py-2">${escapeHtml(c.tenant_name || 'N/A')}</td>
+                <td class="px-4 py-2">${AppUtils.formatDate(c.created_at)}</td>
+                <td class="px-4 py-2">${AppUtils.escapeHtml(c.tenant_name || 'N/A')}</td>
                 <td class="px-4 py-2">#${c.id}</td>
-                <td class="px-4 py-2">${escapeHtml(c.owner || 'N/A')}</td>
-                <td class="px-4 py-2 text-right">${UI.formatCurrency(base)}</td>
-                <td class="px-4 py-2 text-right">${UI.formatCurrency(comision)}</td>
-                <td class="px-4 py-2 text-right font-medium">${UI.formatCurrency(total)}</td>
+                <td class="px-4 py-2">${AppUtils.escapeHtml(c.owner || 'N/A')}</td>
+                <td class="px-4 py-2 text-right">${AppUtils.formatCurrency(base)}</td>
+                <td class="px-4 py-2 text-right">${AppUtils.formatCurrency(comision)}</td>
+                <td class="px-4 py-2 text-right font-medium">${AppUtils.formatCurrency(total)}</td>
                 <td class="px-4 py-2 text-center">
                     <span class="${estadoClass} font-medium">${estadoText}</span>
                 </td>
@@ -401,10 +360,10 @@ async function actualizarTablaIngresos() {
     tfoot.innerHTML = `
         <tr class="bg-gray-100 font-bold">
             <td colspan="4" class="px-4 py-2 text-right">TOTALES:</td>
-            <td class="px-4 py-2 text-right">${UI.formatCurrency(totalBase)}</td>
-            <td class="px-4 py-2 text-right">${UI.formatCurrency(totalComision)}</td>
-            <td class="px-4 py-2 text-right text-blue-600">${UI.formatCurrency(totalGeneral)}</td>
-            <td class="px-4 py-2 text-right text-green-600">${UI.formatCurrency(totalPagado)}</td>
+            <td class="px-4 py-2 text-right">${AppUtils.formatCurrency(totalBase)}</td>
+            <td class="px-4 py-2 text-right">${AppUtils.formatCurrency(totalComision)}</td>
+            <td class="px-4 py-2 text-right text-blue-600">${AppUtils.formatCurrency(totalGeneral)}</td>
+            <td class="px-4 py-2 text-right text-green-600">${AppUtils.formatCurrency(totalPagado)}</td>
         </tr>
     `;
 }
@@ -414,7 +373,7 @@ async function actualizarTablaPropietarios() {
     if (!tbody) return;
     
     try {
-        const token = localStorage.getItem('authToken');
+        const token = sessionStorage.getItem('authToken');
         const response = await fetch('/.netlify/functions/owners', {
             headers: { 'Authorization': token }
         });
@@ -443,12 +402,12 @@ async function actualizarTablaPropietarios() {
             
             return `
                 <tr class="hover:bg-gray-50">
-                    <td class="px-4 py-2 font-medium">${escapeHtml(p.name)}</td>
+                    <td class="px-4 py-2 font-medium">${AppUtils.escapeHtml(p.name)}</td>
                     <td class="px-4 py-2 text-center">${p.total_contracts || 0}</td>
                     <td class="px-4 py-2 text-center">-</td>
-                    <td class="px-4 py-2 text-right">${UI.formatCurrency(totalBruto)}</td>
-                    <td class="px-4 py-2 text-right">${UI.formatCurrency(comision)}</td>
-                    <td class="px-4 py-2 text-right font-bold text-green-600">${UI.formatCurrency(ingresoNeto)}</td>
+                    <td class="px-4 py-2 text-right">${AppUtils.formatCurrency(totalBruto)}</td>
+                    <td class="px-4 py-2 text-right">${AppUtils.formatCurrency(comision)}</td>
+                    <td class="px-4 py-2 text-right font-bold text-green-600">${AppUtils.formatCurrency(ingresoNeto)}</td>
                 </tr>
             `;
         }).join('');
@@ -458,15 +417,15 @@ async function actualizarTablaPropietarios() {
                 <td class="px-4 py-2">TOTALES</td>
                 <td class="px-4 py-2 text-center">-</td>
                 <td class="px-4 py-2 text-center">-</td>
-                <td class="px-4 py-2 text-right">${UI.formatCurrency(totalGlobalBruto)}</td>
-                <td class="px-4 py-2 text-right">${UI.formatCurrency(totalGlobalComision)}</td>
-                <td class="px-4 py-2 text-right text-green-700">${UI.formatCurrency(totalGlobalNeto)}</td>
+                <td class="px-4 py-2 text-right">${AppUtils.formatCurrency(totalGlobalBruto)}</td>
+                <td class="px-4 py-2 text-right">${AppUtils.formatCurrency(totalGlobalComision)}</td>
+                <td class="px-4 py-2 text-right text-green-700">${AppUtils.formatCurrency(totalGlobalNeto)}</td>
             </tr>
         `;
         
     } catch (error) {
         console.error('Error cargando reporte de propietarios:', error);
-        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-red-500">Error al cargar el reporte de propietarios: ${error.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-red-500">Error al cargar el reporte de propietarios: ${AppUtils.escapeHtml(error.message)}</td></tr>`;
     }
 }
 
@@ -485,12 +444,12 @@ function actualizarTablaInquilinos() {
         
         return `
             <tr>
-                <td class="px-4 py-2">${UI.formatDate(t.created_at)}</td>
-                <td class="px-4 py-2">${escapeHtml(t.dni)}</td>
-                <td class="px-4 py-2 font-medium">${escapeHtml(t.name)}</td>
-                <td class="px-4 py-2">${escapeHtml(t.email)}</td>
-                <td class="px-4 py-2">${escapeHtml(t.phone || '-')}</td>
-                <td class="px-4 py-2">${escapeHtml(t.address || '-')}</td>
+                <td class="px-4 py-2">${AppUtils.formatDate(t.created_at)}</td>
+                <td class="px-4 py-2">${AppUtils.escapeHtml(t.dni)}</td>
+                <td class="px-4 py-2 font-medium">${AppUtils.escapeHtml(t.name)}</td>
+                <td class="px-4 py-2">${AppUtils.escapeHtml(t.email)}</td>
+                <td class="px-4 py-2">${AppUtils.escapeHtml(t.phone || '-')}</td>
+                <td class="px-4 py-2">${AppUtils.escapeHtml(t.address || '-')}</td>
                 <td class="px-4 py-2 text-center">${contratos}</td>
             </tr>
         `;
@@ -521,13 +480,13 @@ function actualizarTablaContratos() {
         
         return `
             <tr>
-                <td class="px-4 py-2">${UI.formatDate(c.created_at)}</td>
-                <td class="px-4 py-2">${escapeHtml(c.tenant_name || 'N/A')}</td>
-                <td class="px-4 py-2">${escapeHtml(c.owner || 'N/A')}</td>
-                <td class="px-4 py-2 text-right">${UI.formatCurrency(c.base_amount)}</td>
+                <td class="px-4 py-2">${AppUtils.formatDate(c.created_at)}</td>
+                <td class="px-4 py-2">${AppUtils.escapeHtml(c.tenant_name || 'N/A')}</td>
+                <td class="px-4 py-2">${AppUtils.escapeHtml(c.owner || 'N/A')}</td>
+                <td class="px-4 py-2 text-right">${AppUtils.formatCurrency(c.base_amount)}</td>
                 <td class="px-4 py-2 text-center">${c.duration} meses</td>
-                <td class="px-4 py-2">${UI.formatDate(c.start_date)}</td>
-                <td class="px-4 py-2">${c.end_date ? UI.formatDate(c.end_date) : '-'}</td>
+                <td class="px-4 py-2">${AppUtils.formatDate(c.start_date)}</td>
+                <td class="px-4 py-2">${c.end_date ? AppUtils.formatDate(c.end_date) : '-'}</td>
                 <td class="px-4 py-2">
                     <span class="badge ${c.status === 'active' ? 'badge-success' : 'badge-warning'}">
                         ${c.status === 'active' ? 'Activo' : c.status}
@@ -540,7 +499,7 @@ function actualizarTablaContratos() {
     tfoot.innerHTML = `
         <tr class="bg-gray-100 font-bold">
             <td colspan="3" class="px-4 py-2 text-right">TOTAL MONTO CONTRATOS:</td>
-            <td class="px-4 py-2 text-right text-purple-600">${UI.formatCurrency(totalMonto)}</td>
+            <td class="px-4 py-2 text-right text-purple-600">${AppUtils.formatCurrency(totalMonto)}</td>
             <td colspan="4"></td>
         </tr>
     `;
@@ -572,12 +531,12 @@ function actualizarTablaAumentos() {
         
         return `
             <tr>
-                <td class="px-4 py-2">${UI.formatDate(c.created_at)}</td>
-                <td class="px-4 py-2 font-medium">${escapeHtml(c.tenant_name || 'N/A')}</td>
-                <td class="px-4 py-2 text-right">${UI.formatCurrency(baseAmount)}</td>
-                <td class="px-4 py-2">${UI.formatDate(c.next_increase_date)}</td>
+                <td class="px-4 py-2">${AppUtils.formatDate(c.created_at)}</td>
+                <td class="px-4 py-2 font-medium">${AppUtils.escapeHtml(c.tenant_name || 'N/A')}</td>
+                <td class="px-4 py-2 text-right">${AppUtils.formatCurrency(baseAmount)}</td>
+                <td class="px-4 py-2">${AppUtils.formatDate(c.next_increase_date)}</td>
                 <td class="px-4 py-2 text-center">${increasePercentage}%</td>
-                <td class="px-4 py-2 text-right text-green-600 font-medium">${UI.formatCurrency(newAmount)}</td>
+                <td class="px-4 py-2 text-right text-green-600 font-medium">${AppUtils.formatCurrency(newAmount)}</td>
                 <td class="px-4 py-2 text-center">
                     <span class="${diffDays <= 7 ? 'text-red-600 font-bold' : diffDays <= 15 ? 'text-yellow-600' : 'text-green-600'}">
                         ${diffDays} días
@@ -615,13 +574,13 @@ function actualizarResumenEjecutivo() {
             </div>
             <div class="flex justify-between border-b pb-2">
                 <span class="font-medium">Valor promedio por contrato:</span>
-                <span class="text-purple-600 font-bold">${UI.formatCurrency(avgContractValue)}</span>
+                <span class="text-purple-600 font-bold">${AppUtils.formatCurrency(avgContractValue)}</span>
             </div>
         </div>
         <div class="space-y-3">
             <div class="flex justify-between border-b pb-2">
                 <span class="font-medium">Ingresos del período:</span>
-                <span class="text-blue-600 font-bold">${UI.formatCurrency(totalIncome)}</span>
+                <span class="text-blue-600 font-bold">${AppUtils.formatCurrency(totalIncome)}</span>
             </div>
             <div class="flex justify-between border-b pb-2">
                 <span class="font-medium">Próximos aumentos (30 días):</span>
@@ -641,7 +600,7 @@ function actualizarResumenEjecutivo() {
 
 async function cargarPagosReportes() {
     try {
-        const token = localStorage.getItem('authToken');
+        const token = sessionStorage.getItem('authToken');
         const response = await fetch('/.netlify/functions/payments', {
             headers: { 'Authorization': token }
         });
@@ -653,13 +612,16 @@ async function cargarPagosReportes() {
     }
 }
 
+// reports.js - Reportes y Estadísticas – CORREGIDO (escapa datos en agregarTablaPagos)
+// (Solo se muestra la función modificada; el resto del archivo permanece igual)
+
 function agregarTablaPagos(pagos) {
     if (document.getElementById('paymentsReportTable')) return;
     
     const container = document.querySelector('#reporteCompleto .space-y-6');
     if (!container) return;
     
-    const pagosFiltrados = pagos.filter(p => 
+    const pagosFiltrados = (pagos || []).filter(p => 
         currentData.filteredContracts.some(c => c.id === p.contract_id)
     );
     
@@ -687,7 +649,7 @@ function agregarTablaPagos(pagos) {
                     </div>
                     <div class="bg-blue-50 p-4 rounded-lg">
                         <p class="text-sm text-blue-700">Total</p>
-                        <p class="text-2xl font-bold text-blue-600">${UI.formatCurrency(totalPagos)}</p>
+                        <p class="text-2xl font-bold text-blue-600">${AppUtils.formatCurrency(totalPagos)}</p>
                     </div>
                 </div>
                 
@@ -705,11 +667,11 @@ function agregarTablaPagos(pagos) {
                     <tbody>
                         ${pagosFiltrados.slice(0, 20).map(p => `
                             <tr>
-                                <td class="px-4 py-2">${UI.formatDate(p.created_at)}</td>
-                                <td class="px-4 py-2">${escapeHtml(p.tenant_name || 'N/A')}</td>
-                                <td class="px-4 py-2">${escapeHtml(p.concept_name || 'Alquiler')}</td>
-                                <td class="px-4 py-2">${UI.formatCurrency(p.total_amount)}</td>
-                                <td class="px-4 py-2">${UI.formatDate(p.due_date)}</td>
+                                <td class="px-4 py-2">${AppUtils.formatDate(p.created_at)}</td>
+                                <td class="px-4 py-2">${AppUtils.escapeHtml(p.tenant_name || 'N/A')}</td>
+                                <td class="px-4 py-2">${AppUtils.escapeHtml(p.concept_name || 'Alquiler')}</td>
+                                <td class="px-4 py-2">${AppUtils.formatCurrency(p.total_amount)}</td>
+                                <td class="px-4 py-2">${AppUtils.formatDate(p.due_date)}</td>
                                 <td class="px-4 py-2">
                                     <span class="badge ${p.status === 'paid' ? 'badge-success' : 'badge-warning'}">
                                         ${p.status === 'paid' ? 'Pagado' : 'Pendiente'}
@@ -736,7 +698,7 @@ window.exportarExcelCompleto = async function() {
         const wb = XLSX.utils.book_new();
         
         const incomeData = currentData.filteredContracts.map(c => ({
-            Fecha: UI.formatDate(c.created_at),
+            Fecha: AppUtils.formatDate(c.created_at),
             Inquilino: c.tenant_name,
             Contrato: c.id,
             Propietario: c.owner,
@@ -748,7 +710,7 @@ window.exportarExcelCompleto = async function() {
         XLSX.utils.book_append_sheet(wb, wsIncome, 'Ingresos');
         
         const tenantsData = currentData.tenants.map(t => ({
-            Fecha: UI.formatDate(t.created_at),
+            Fecha: AppUtils.formatDate(t.created_at),
             DNI: t.dni,
             Nombre: t.name,
             Email: t.email,
@@ -760,7 +722,7 @@ window.exportarExcelCompleto = async function() {
         XLSX.utils.book_append_sheet(wb, wsTenants, 'Inquilinos');
         
         const contractsData = currentData.contracts.map(c => ({
-            Fecha: UI.formatDate(c.created_at),
+            Fecha: AppUtils.formatDate(c.created_at),
             Inquilino: c.tenant_name,
             Propietario: c.owner,
             Monto: c.base_amount,
@@ -776,14 +738,14 @@ window.exportarExcelCompleto = async function() {
             const pagos = await cargarPagosReportes();
             if (pagos && pagos.length > 0) {
                 const pagosData = pagos.map(p => ({
-                    Fecha: UI.formatDate(p.created_at),
+                    Fecha: AppUtils.formatDate(p.created_at),
                     Inquilino: p.tenant_name || 'N/A',
                     Contrato: p.contract_id,
                     Concepto: p.concept_name || 'Alquiler',
                     Monto: p.amount,
                     Comisión: p.commission || 0,
                     Total: p.total_amount,
-                    Vencimiento: UI.formatDate(p.due_date),
+                    Vencimiento: AppUtils.formatDate(p.due_date),
                     Estado: p.status === 'paid' ? 'Pagado' : 'Pendiente'
                 }));
                 const wsPagos = XLSX.utils.json_to_sheet(pagosData);
@@ -823,7 +785,7 @@ window.exportarPDFCompleto = function() {
         
         doc.setFontSize(10);
         doc.setTextColor(0, 0, 0);
-        doc.text(`Total Ingresos: ${UI.formatCurrency(currentData.filteredContracts.reduce((s, c) => s + (parseFloat(c.base_amount) || 0), 0))}`, 14, 56);
+        doc.text(`Total Ingresos: ${AppUtils.formatCurrency(currentData.filteredContracts.reduce((s, c) => s + (parseFloat(c.base_amount) || 0), 0))}`, 14, 56);
         doc.text(`Total Inquilinos: ${currentData.tenants.length}`, 14, 62);
         doc.text(`Contratos Activos: ${currentData.contracts.filter(c => c.status === 'active').length}`, 14, 68);
         
@@ -831,7 +793,7 @@ window.exportarPDFCompleto = function() {
             head: [['Inquilino', 'Monto', 'Estado']],
             body: currentData.contracts.slice(0, 20).map(c => [
                 c.tenant_name || 'N/A',
-                UI.formatCurrency(c.base_amount),
+                AppUtils.formatCurrency(c.base_amount),
                 c.status === 'active' ? 'Activo' : c.status
             ]),
             startY: 80,
@@ -847,15 +809,4 @@ window.exportarPDFCompleto = function() {
     }
 };
 
-function escapeHtml(text) {
-    if (!text) return '';
-    return String(text)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
-
-// Funciones globales
 window.generarReporteCompleto = generarReporteCompleto;

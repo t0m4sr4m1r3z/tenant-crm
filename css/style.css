@@ -529,3 +529,472 @@ input.valid, .dark input.valid {
         justify-content: space-between;
     }
 }
+
+/* ============================================
+   MODO OSCURO (DARK MODE)
+   ============================================ */
+
+/* Clase para activar modo oscuro en el body */
+body.dark {
+    background-color: #0f172a;
+    color: #e2e8f0;
+}
+
+/* Overrides para componentes específicos en modo oscuro */
+body.dark .bg-white {
+    background-color: #1e293b !important;
+    border-color: #334155 !important;
+}
+
+body.dark .bg-gray-50 {
+    background-color: #1e293b !important;
+}
+
+body.dark .bg-slate-50 {
+    background-color: #0f172a !important;
+}
+
+body.dark .text-gray-700,
+body.dark .text-slate-700 {
+    color: #cbd5e1 !important;
+}
+
+body.dark .text-gray-600,
+body.dark .text-slate-600 {
+    color: #94a3b8 !important;
+}
+
+body.dark .text-gray-500,
+body.dark .text-slate-500 {
+    color: #64748b !important;
+}
+
+body.dark .border-gray-100,
+body.dark .border-slate-100 {
+    border-color: #334155 !important;
+}
+
+body.dark .border-gray-200,
+body.dark .border-slate-200 {
+    border-color: #475569 !important;
+}
+
+body.dark .border-gray-300 {
+    border-color: #475569 !important;
+}
+
+body.dark .bg-gray-100 {
+    background-color: #1e293b !important;
+}
+
+body.dark .bg-gray-50 {
+    background-color: #1e293b !important;
+}
+
+body.dark .bg-slate-100 {
+    background-color: #1e293b !important;
+}
+
+body.dark .shadow-sm {
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.3) !important;
+}
+
+body.dark .shadow-xl {
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4) !important;
+}
+
+body.dark .glass-card {
+    background: rgba(30, 41, 59, 0.85) !important;
+    border-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+body.dark .bg-white\/80 {
+    background-color: rgba(30, 41, 59, 0.8) !important;
+}
+
+body.dark input,
+body.dark select,
+body.dark textarea {
+    background-color: #1e293b !important;
+    border-color: #475569 !important;
+    color: #e2e8f0 !important;
+}
+
+body.dark input:focus,
+body.dark select:focus,
+body.dark textarea:focus {
+    border-color: #6366f1 !important;
+    outline: 2px solid #6366f1 !important;
+    outline-offset: 2px !important;
+}
+
+body.dark .skeleton {
+    background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%) !important;
+}
+
+body.dark .toast-notification {
+    background: rgba(30, 41, 59, 0.9) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+body.dark .badge-success {
+    background-color: rgba(16, 185, 129, 0.2) !important;
+    color: #34d399 !important;
+}
+
+body.dark .badge-warning {
+    background-color: rgba(245, 158, 11, 0.2) !important;
+    color: #fbbf24 !important;
+}
+
+body.dark .badge-danger {
+    background-color: rgba(239, 68, 68, 0.2) !important;
+    color: #f87171 !important;
+}
+
+body.dark .badge-info {
+    background-color: rgba(59, 130, 246, 0.2) !important;
+    color: #60a5fa !important;
+}
+
+body.dark .text-gradient {
+    background: linear-gradient(to right, #818cf8, #a855f7) !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    background-clip: text !important;
+}
+
+/* Tarjetas en modo oscuro */
+body.dark .bg-white\/80 {
+    background-color: rgba(30, 41, 59, 0.8) !important;
+}
+
+body.dark .bg-opacity-75 {
+    background-color: rgba(15, 23, 42, 0.85) !important;
+}
+
+/* Modales en modo oscuro */
+body.dark .modal-content,
+body.dark .bg-white.rounded-xl {
+    background-color: #1e293b !important;
+}
+
+body.dark .sticky.top-0.bg-white {
+    background-color: #1e293b !important;
+    border-color: #334155 !important;
+}
+
+body.dark .bg-gray-50.p-4.rounded-lg {
+    background-color: #0f172a !important;
+}
+
+body.dark .bg-gray-100 {
+    background-color: #1e293b !important;
+}
+
+/* Sidebar oscuro */
+body.dark #sidebar .glass-card {
+    background: rgba(15, 23, 42, 0.95) !important;
+}
+
+body.dark #sidebar .border-slate-200\/50 {
+    border-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+body.dark #sidebar .text-slate-600 {
+    color: #94a3b8 !important;
+}
+
+body.dark #sidebar .text-slate-400 {
+    color: #64748b !important;
+}
+
+body.dark #sidebar a:hover {
+    background-color: rgba(99, 102, 241, 0.1) !important;
+}
+
+/* Tablas en modo oscuro */
+body.dark table thead.bg-gray-50 {
+    background-color: #1e293b !important;
+}
+
+body.dark table thead th {
+    color: #94a3b8 !important;
+}
+
+body.dark table tbody tr {
+    border-color: #334155 !important;
+}
+
+body.dark table tbody td {
+    color: #e2e8f0 !important;
+}
+
+body.dark table tbody tr:hover {
+    background-color: rgba(30, 41, 59, 0.6) !important;
+}
+
+/* Scrollbar oscuro */
+body.dark ::-webkit-scrollbar-thumb {
+    background: rgba(99, 102, 241, 0.4) !important;
+}
+
+body.dark ::-webkit-scrollbar-thumb:hover {
+    background: rgba(99, 102, 241, 0.6) !important;
+}
+
+/* ============================================
+   VALIDACIÓN DE FORMULARIOS
+   ============================================ */
+
+   .field-error {
+    font-size: 0.75rem;
+    color: #ef4444;
+    margin-top: 0.25rem;
+    transition: all 0.2s ease;
+}
+
+body.dark .field-error {
+    color: #f87171;
+}
+
+input.border-red-500,
+select.border-red-500,
+textarea.border-red-500 {
+    border-color: #ef4444 !important;
+}
+
+input.ring-red-500,
+select.ring-red-500,
+textarea.ring-red-500 {
+    --tw-ring-color: #ef4444 !important;
+}
+
+body.dark input.border-red-500,
+body.dark select.border-red-500,
+body.dark textarea.border-red-500 {
+    border-color: #f87171 !important;
+}
+
+/* ============================================
+   BREADCRUMBS - MIGAS DE PAN
+   ============================================ */
+
+   .breadcrumb-nav {
+    padding: 0.75rem 1.5rem;
+    background: transparent;
+    font-size: 0.875rem;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.5);
+    margin-bottom: 0.5rem;
+}
+
+.breadcrumb-list {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    gap: 0.25rem 0.5rem;
+}
+
+.breadcrumb-item {
+    display: flex;
+    align-items: center;
+    font-size: 0.85rem;
+    color: #64748b;
+}
+
+.breadcrumb-item .breadcrumb-link {
+    color: #4f46e5;
+    text-decoration: none;
+    transition: color 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.breadcrumb-item .breadcrumb-link:hover {
+    color: #4338ca;
+    text-decoration: underline;
+}
+
+.breadcrumb-item .breadcrumb-current {
+    color: #1e293b;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.breadcrumb-icon {
+    font-size: 0.75rem;
+    opacity: 0.7;
+    margin-right: 0.1rem;
+}
+
+.breadcrumb-separator {
+    color: #94a3b8;
+    margin: 0 0.25rem;
+    font-weight: 300;
+    font-size: 0.9rem;
+}
+
+/* Modo oscuro */
+body.dark .breadcrumb-nav {
+    border-bottom-color: rgba(51, 65, 85, 0.5);
+}
+
+body.dark .breadcrumb-item {
+    color: #94a3b8;
+}
+
+body.dark .breadcrumb-item .breadcrumb-link {
+    color: #818cf8;
+}
+
+body.dark .breadcrumb-item .breadcrumb-link:hover {
+    color: #a5b4fc;
+}
+
+body.dark .breadcrumb-item .breadcrumb-current {
+    color: #e2e8f0;
+}
+
+body.dark .breadcrumb-separator {
+    color: #64748b;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+    .breadcrumb-nav {
+        padding: 0.5rem 1rem;
+        font-size: 0.8rem;
+    }
+    
+    .breadcrumb-item {
+        font-size: 0.75rem;
+    }
+    
+    .breadcrumb-icon {
+        font-size: 0.65rem;
+    }
+}
+
+/* ============================================
+   CALENDARIO - FullCalendar
+   ============================================ */
+
+   #calendarContainer {
+    transition: background-color 0.3s ease;
+}
+
+#calendar {
+    font-family: 'Inter', sans-serif;
+    --fc-border-color: #e5e7eb;
+    --fc-neutral-bg-color: #f9fafb;
+    --fc-page-bg-color: #ffffff;
+    --fc-button-bg-color: #4f46e5;
+    --fc-button-border-color: #4f46e5;
+    --fc-button-hover-bg-color: #4338ca;
+    --fc-button-text-color: #ffffff;
+    --fc-today-bg-color: rgba(99, 102, 241, 0.1);
+    --fc-event-bg-color: #4f46e5;
+    --fc-event-border-color: #4f46e5;
+    --fc-event-text-color: #ffffff;
+}
+
+#calendar .fc-daygrid-day {
+    cursor: pointer;
+}
+
+#calendar .fc-daygrid-day:hover {
+    background-color: rgba(99, 102, 241, 0.05);
+}
+
+#calendar .fc-day-today {
+    background-color: var(--fc-today-bg-color);
+}
+
+/* Tooltip del calendario */
+.calendar-tooltip {
+    background-color: #1e293b;
+    color: #e2e8f0;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+body.dark .calendar-tooltip {
+    background-color: #0f172a;
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Botones del calendario en modo oscuro */
+body.dark .fc .fc-button-primary {
+    background-color: #334155 !important;
+    border-color: #475569 !important;
+    color: #e2e8f0 !important;
+}
+
+body.dark .fc .fc-button-primary:hover {
+    background-color: #475569 !important;
+}
+
+body.dark .fc .fc-button-primary.fc-button-active {
+    background-color: #4f46e5 !important;
+    border-color: #4f46e5 !important;
+}
+
+body.dark .fc .fc-toolbar-title {
+    color: #e2e8f0 !important;
+}
+
+body.dark .fc .fc-col-header-cell-cushion {
+    color: #94a3b8 !important;
+}
+
+body.dark .fc .fc-daygrid-day-number {
+    color: #cbd5e1 !important;
+}
+
+body.dark .fc .fc-daygrid-day.fc-day-today {
+    background-color: rgba(99, 102, 241, 0.2) !important;
+}
+
+body.dark .fc .fc-daygrid-day.fc-day-today .fc-daygrid-day-number {
+    color: #a5b4fc !important;
+}
+
+body.dark .fc .fc-daygrid-day:hover {
+    background-color: rgba(99, 102, 241, 0.1) !important;
+}
+
+body.dark .fc .fc-list-day-cushion {
+    background-color: #1e293b !important;
+    color: #e2e8f0 !important;
+}
+
+body.dark .fc .fc-list-table td {
+    background-color: #1e293b !important;
+    color: #e2e8f0 !important;
+    border-color: #334155 !important;
+}
+
+body.dark .fc .fc-list-table tr:hover td {
+    background-color: #334155 !important;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    #calendarContainer {
+        padding: 0.5rem !important;
+    }
+    
+    #calendar .fc-toolbar {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+    
+    #calendar .fc-toolbar-title {
+        font-size: 1rem !important;
+    }
+}

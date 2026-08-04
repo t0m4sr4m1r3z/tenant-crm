@@ -1,16 +1,24 @@
-// payments.js - Sistema de Pagos y Cobranzas
+// payments.js - Sistema de Pagos y Cobranzas (Versión con permisos) – CORREGIDO
 const API = {
     baseUrl: '/.netlify/functions',
     
     async request(endpoint, options = {}) {
-        const token = localStorage.getItem('authToken');
-        
+        const token = sessionStorage.getItem('authToken');
+
+        const isGet = !options.method || options.method === 'GET';
+        if (isGet) {
+            const cached = window.APICache ? window.APICache.get(endpoint, options) : null;
+            if (cached) {
+                return cached;
+            }
+        }
+
         const headers = {
             'Content-Type': 'application/json',
             ...(token && { 'Authorization': token }),
             ...options.headers
         };
-        
+
         try {
             console.log(`🌐 Llamando a ${endpoint}...`);
             const response = await fetch(`${this.baseUrl}${endpoint}`, {
@@ -19,8 +27,8 @@ const API = {
             });
             
             if (response.status === 401) {
-                localStorage.removeItem('authToken');
-                localStorage.removeItem('user');
+                sessionStorage.removeItem('authToken');
+                sessionStorage.removeItem('user');
                 if (window.UI) UI.toast('Sesión expirada', 'warning');
                 setTimeout(() => {
                     window.location.href = '/login.html';
@@ -33,7 +41,11 @@ const API = {
             if (!response.ok) {
                 throw new Error(data.error || 'Error en la petición');
             }
-            
+
+            if (isGet && window.APICache) {
+                window.APICache.set(endpoint, data, options);
+            }
+
             return data;
         } catch (error) {
             console.error('❌ API Error:', error);
@@ -83,6 +95,9 @@ const API = {
 
 // Estado global
 let currentPayments = [];
+let currentPage = 1;
+const PAGE_SIZE = 10;
+let filteredPayments = [];
 let currentContracts = [];
 let currentDelinquency = [];
 let selectedPaymentId = null;
@@ -91,32 +106,34 @@ let selectedPaymentId = null;
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('💰 Página de pagos cargada');
     
-    if (!window.UI) {
-        window.UI = {
-            toast: (msg, type) => alert(`${type}: ${msg}`),
-            confirm: (options) => {
-                if (confirm(options.message)) options.onConfirm();
-                else if (options.onCancel) options.onCancel();
-            },
-            formatCurrency: (amount) => `$${Number(amount).toLocaleString()}`,
-            formatDate: (date) => new Date(date).toLocaleDateString('es-ES')
-        };
-    }
-    
-    const token = localStorage.getItem('authToken');
+    const token = sessionStorage.getItem('authToken');
     if (!token) {
         window.location.href = '/login.html';
         return;
     }
+
+    if (!document.getElementById('paymentsPagination')) {
+        const tableContainer = document.querySelector('.bg-white.rounded-xl.shadow-sm.border.border-gray-100.overflow-hidden');
+        if (tableContainer) {
+            const paginationDiv = document.createElement('div');
+            paginationDiv.id = 'paymentsPagination';
+            paginationDiv.className = 'flex justify-between items-center px-6 py-3 bg-gray-50 border-t border-gray-200';
+            tableContainer.appendChild(paginationDiv);
+        }
+    }
     
-    initSidebar();
+    AppSidebar.init();
     initModals();
     initEventListeners();
     await loadContracts();
     await loadPayments();
     await loadDelinquency();
+
+    const registerBtn = document.getElementById('registerPaymentBtn');
+    if (registerBtn && !AUTH.hasPermission('canCreate')) {
+        registerBtn.style.display = 'none';
+    }
     
-    // Setear fechas por defecto
     const today = new Date();
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -125,33 +142,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('filterDateTo').value = today.toISOString().split('T')[0];
 });
 
-function initSidebar() {
-    const menuBtn = document.getElementById('menuBtn');
-    const sidebar = document.getElementById('sidebar');
-    const closeBtn = document.getElementById('closeSidebarBtn');
-    const overlay = document.getElementById('sidebarOverlay');
-    
-    if (menuBtn && sidebar) {
-        menuBtn.addEventListener('click', () => {
-            sidebar.classList.remove('hidden');
-        });
-    }
-    
-    if (closeBtn && sidebar) {
-        closeBtn.addEventListener('click', () => {
-            sidebar.classList.add('hidden');
-        });
-    }
-    
-    if (overlay && sidebar) {
-        overlay.addEventListener('click', () => {
-            sidebar.classList.add('hidden');
-        });
-    }
-}
-
 function initModals() {
-    // Modal de registro de pago
     const modal = document.getElementById('paymentModal');
     const closeBtn = document.getElementById('closeModalBtn');
     const cancelBtn = document.getElementById('cancelModalBtn');
@@ -183,7 +174,6 @@ function initModals() {
         });
     }
     
-    // Modal de confirmación de pago
     const payModal = document.getElementById('payModal');
     const cancelPayBtn = document.getElementById('cancelPayBtn');
     const confirmPayBtn = document.getElementById('confirmPayBtn');
@@ -200,7 +190,6 @@ function initModals() {
         });
     }
     
-    // Cerrar con ESC
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             if (modal && !modal.classList.contains('hidden')) {
@@ -241,6 +230,7 @@ async function loadContracts() {
         populateContractSelect();
     } catch (error) {
         console.error('Error cargando contratos:', error);
+        currentContracts = [];
     }
 }
 
@@ -251,25 +241,33 @@ function populateContractSelect() {
     if (!select || !modalSelect) return;
     
     const options = '<option value="">Todos los contratos</option>' +
-        currentContracts.map(c => 
-            `<option value="${c.id}">#${c.id} - ${c.tenant_name || 'N/A'}</option>`
+        (currentContracts || []).map(c => 
+            `<option value="${c.id}">#${c.id} - ${AppUtils.escapeHtml(c.tenant_name || 'N/A')}</option>`
         ).join('');
     
     select.innerHTML = options;
     modalSelect.innerHTML = '<option value="">Seleccionar contrato...</option>' +
-        currentContracts.map(c => 
-            `<option value="${c.id}">#${c.id} - ${c.tenant_name || 'N/A'}</option>`
+        (currentContracts || []).map(c => 
+            `<option value="${c.id}">#${c.id} - ${AppUtils.escapeHtml(c.tenant_name || 'N/A')}</option>`
         ).join('');
 }
+
+// ============================================
+// FUNCIONES DE PAGINACIÓN
+// ============================================
 
 async function loadPayments() {
     try {
         const filters = obtenerFiltros();
         currentPayments = await API.getPayments(filters);
-        renderizarTablaPagos(currentPayments);
+        filteredPayments = [...(currentPayments || [])];
+        currentPage = 1;
+        renderizarPagosPaginado();
         actualizarResumenMensual();
     } catch (error) {
         console.error('Error cargando pagos:', error);
+        currentPayments = [];
+        filteredPayments = [];
         document.getElementById('paymentsTableBody').innerHTML = `
             <tr>
                 <td colspan="7" class="px-6 py-8 text-center text-gray-500">
@@ -281,26 +279,15 @@ async function loadPayments() {
     }
 }
 
-async function loadDelinquency() {
-    try {
-        currentDelinquency = await API.getDelinquency();
-        actualizarResumenMorosidad();
-    } catch (error) {
-        console.error('Error cargando morosidad:', error);
-    }
-}
-
-function obtenerFiltros() {
-    return {
-        contract_id: document.getElementById('filterContract').value,
-        status: document.getElementById('filterStatus').value,
-        from_date: document.getElementById('filterDateFrom').value,
-        to_date: document.getElementById('filterDateTo').value
-    };
-}
-
-function aplicarFiltros() {
-    loadPayments();
+function renderizarPagosPaginado() {
+    const totalItems = filteredPayments.length;
+    const totalPages = Math.ceil(totalItems / PAGE_SIZE);
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    const pageItems = filteredPayments.slice(start, end);
+    
+    renderizarTablaPagos(pageItems);
+    renderPaginationPayments(totalItems, totalPages);
 }
 
 function renderizarTablaPagos(payments) {
@@ -312,6 +299,8 @@ function renderizarTablaPagos(payments) {
         return;
     }
     
+    const canDelete = AUTH.hasPermission('canDelete');
+    const canEdit = AUTH.hasPermission('canEdit');
     const today = new Date();
     
     tbody.innerHTML = payments.map(p => {
@@ -332,23 +321,17 @@ function renderizarTablaPagos(payments) {
         return `
             <tr class="hover:bg-gray-50 transition">
                 <td class="px-6 py-4">#${p.contract_id}</td>
-                <td class="px-6 py-4 font-medium">${p.tenant_name || 'N/A'}</td>
-                <td class="px-6 py-4">${p.concept_name || 'Alquiler'}</td>
-                <td class="px-6 py-4 font-bold">${UI.formatCurrency(p.total_amount)}</td>
-                <td class="px-6 py-4 ${isOverdue ? 'text-red-600 font-medium' : ''}">${UI.formatDate(p.due_date)}</td>
+                <td class="px-6 py-4 font-medium">${AppUtils.escapeHtml(p.tenant_name || 'N/A')}</td>
+                <td class="px-6 py-4">${AppUtils.escapeHtml(p.concept_name || 'Alquiler')}</td>
+                <td class="px-6 py-4 font-bold">${AppUtils.formatCurrency(p.total_amount)}</td>
+                <td class="px-6 py-4 ${isOverdue ? 'text-red-600 font-medium' : ''}">${AppUtils.formatDate(p.due_date)}</td>
                 <td class="px-6 py-4">
                     <span class="px-2 py-1 text-xs rounded-full ${statusClass}">${statusText}</span>
                 </td>
                 <td class="px-6 py-4">
                     <div class="flex gap-2">
-                        ${p.status !== 'paid' ? `
-                            <button onclick="abrirModalPagar(${p.id})" class="text-green-600 hover:text-green-800 p-2 rounded-lg hover:bg-green-50 transition" title="Marcar como pagado">
-                                <i class="fas fa-check"></i>
-                            </button>
-                        ` : ''}
-                        <button onclick="eliminarPago(${p.id})" class="text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-50 transition" title="Eliminar">
-                            <i class="fas fa-trash"></i>
-                        </button>
+                        ${canEdit && p.status !== 'paid' ? `<button onclick="abrirModalPagar(${p.id})" class="text-green-600 hover:text-green-800 p-2 rounded-lg hover:bg-green-50 transition" title="Marcar como pagado"><i class="fas fa-check"></i></button>` : ''}
+                        ${canDelete ? `<button onclick="eliminarPago(${p.id})" class="text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-50 transition" title="Eliminar"><i class="fas fa-trash"></i></button>` : ''}
                     </div>
                 </td>
             </tr>
@@ -356,10 +339,85 @@ function renderizarTablaPagos(payments) {
     }).join('');
 }
 
+function renderPaginationPayments(totalItems, totalPages) {
+    const container = document.getElementById('paymentsPagination');
+    if (!container) return;
+    
+    if (totalItems === 0) {
+        container.innerHTML = '';
+        return;
+    }
+    
+    const startItem = (currentPage - 1) * PAGE_SIZE + 1;
+    const endItem = Math.min(currentPage * PAGE_SIZE, totalItems);
+    
+    container.innerHTML = `
+        <div class="flex flex-wrap items-center justify-between gap-3 w-full">
+            <div class="text-sm text-gray-600">
+                Mostrando <span class="font-medium">${startItem}</span> - <span class="font-medium">${endItem}</span> de <span class="font-medium">${totalItems}</span> pagos
+            </div>
+            <div class="flex items-center gap-2">
+                <button onclick="irPaginaPayments(${currentPage - 1})" 
+                        class="px-3 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 transition ${currentPage === 1 ? 'opacity-50 cursor-not-allowed' : ''}"
+                        ${currentPage === 1 ? 'disabled' : ''}
+                        aria-label="Página anterior">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+                <span class="text-sm font-medium px-3 py-1 bg-blue-100 text-blue-700 rounded-lg">${currentPage} / ${totalPages}</span>
+                <button onclick="irPaginaPayments(${currentPage + 1})" 
+                        class="px-3 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 transition ${currentPage === totalPages ? 'opacity-50 cursor-not-allowed' : ''}"
+                        ${currentPage === totalPages ? 'disabled' : ''}
+                        aria-label="Página siguiente">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function irPaginaPayments(page) {
+    const totalPages = Math.ceil(filteredPayments.length / PAGE_SIZE);
+    if (page < 1 || page > totalPages) return;
+    currentPage = page;
+    renderizarPagosPaginado();
+}
+
+// ============================================
+// FUNCIONES DE FILTROS
+// ============================================
+
+function obtenerFiltros() {
+    return {
+        contract_id: document.getElementById('filterContract').value,
+        status: document.getElementById('filterStatus').value,
+        from_date: document.getElementById('filterDateFrom').value,
+        to_date: document.getElementById('filterDateTo').value
+    };
+}
+
+function aplicarFiltros() {
+    currentPage = 1;
+    loadPayments();
+}
+
+// ============================================
+// RESÚMENES
+// ============================================
+
+async function loadDelinquency() {
+    try {
+        currentDelinquency = await API.getDelinquency();
+        actualizarResumenMorosidad();
+    } catch (error) {
+        console.error('Error cargando morosidad:', error);
+        currentDelinquency = [];
+    }
+}
+
 function actualizarResumenMorosidad() {
-    const totalOverdue = currentDelinquency.reduce((sum, d) => sum + Number(d.total_amount), 0);
-    document.getElementById('totalOverdue').textContent = UI.formatCurrency(totalOverdue);
-    document.getElementById('countOverdue').textContent = currentDelinquency.length;
+    const totalOverdue = (currentDelinquency || []).reduce((sum, d) => sum + Number(d.total_amount), 0);
+    document.getElementById('totalOverdue').textContent = AppUtils.formatCurrency(totalOverdue);
+    document.getElementById('countOverdue').textContent = (currentDelinquency || []).length;
 }
 
 function actualizarResumenMensual() {
@@ -370,13 +428,13 @@ function actualizarResumenMensual() {
     const sevenDaysFromNow = new Date();
     sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
     
-    const upcoming = currentPayments.filter(p => {
+    const upcoming = (currentPayments || []).filter(p => {
         if (p.status === 'paid') return false;
         const dueDate = new Date(p.due_date);
         return dueDate <= sevenDaysFromNow && dueDate >= today;
     });
     
-    const monthlyPaid = currentPayments.filter(p => {
+    const monthlyPaid = (currentPayments || []).filter(p => {
         if (p.status !== 'paid') return false;
         const paidDate = new Date(p.paid_at || p.updated_at);
         return paidDate.getMonth() === currentMonth && paidDate.getFullYear() === currentYear;
@@ -385,11 +443,15 @@ function actualizarResumenMensual() {
     const totalUpcoming = upcoming.reduce((sum, p) => sum + Number(p.total_amount), 0);
     const totalMonthly = monthlyPaid.reduce((sum, p) => sum + Number(p.total_amount), 0);
     
-    document.getElementById('totalUpcoming').textContent = UI.formatCurrency(totalUpcoming);
+    document.getElementById('totalUpcoming').textContent = AppUtils.formatCurrency(totalUpcoming);
     document.getElementById('countUpcoming').textContent = upcoming.length;
-    document.getElementById('totalMonth').textContent = UI.formatCurrency(totalMonthly);
+    document.getElementById('totalMonth').textContent = AppUtils.formatCurrency(totalMonthly);
     document.getElementById('countMonth').textContent = monthlyPaid.length;
 }
+
+// ============================================
+// MODAL - NUEVO PAGO
+// ============================================
 
 function abrirModalNuevoPago() {
     document.getElementById('modalTitle').textContent = 'Registrar Nuevo Pago';
@@ -403,13 +465,44 @@ function abrirModalNuevoPago() {
     document.getElementById('paymentModal').classList.remove('hidden');
 }
 
+// ============================================
+// GUARDAR PAGO CON VALIDACIONES MEJORADAS
+// ============================================
+
 async function guardarPago() {
+    const form = document.getElementById('paymentForm');
+    UI.clearAllFieldErrors(form);
+    
+    const contractIdInput = document.getElementById('paymentContractId');
+    const amountInput = document.getElementById('paymentAmount');
+    const dueDateInput = document.getElementById('paymentDueDate');
+    
+    let isValid = true;
+    
+    if (!contractIdInput.value) {
+        UI.showFieldError(contractIdInput, 'Debes seleccionar un contrato');
+        isValid = false;
+    }
+    
+    if (!UI.validateField(amountInput, null, null)) {
+        isValid = false;
+    } else if (parseFloat(amountInput.value) <= 0) {
+        UI.showFieldError(amountInput, 'El monto debe ser mayor a 0');
+        isValid = false;
+    }
+    
+    if (!UI.validateField(dueDateInput, null, null)) {
+        isValid = false;
+    }
+    
+    if (!isValid) return;
+    
     const paymentData = {
-        contract_id: parseInt(document.getElementById('paymentContractId').value),
+        contract_id: parseInt(contractIdInput.value),
         concept_id: parseInt(document.getElementById('paymentConcept').value),
-        amount: parseFloat(document.getElementById('paymentAmount').value),
+        amount: parseFloat(amountInput.value),
         commission: parseFloat(document.getElementById('paymentCommission').value) || 0,
-        due_date: document.getElementById('paymentDueDate').value,
+        due_date: dueDateInput.value,
         payment_date: document.getElementById('paymentDate').value || null,
         payment_method: document.getElementById('paymentMethod').value,
         reference_number: document.getElementById('paymentReference').value,
@@ -421,10 +514,6 @@ async function guardarPago() {
     }
     
     const id = document.getElementById('paymentId').value;
-    
-    // Validaciones
-    if (!paymentData.contract_id) return UI.toast('Debes seleccionar un contrato', 'warning');
-    if (!paymentData.amount || paymentData.amount <= 0) return UI.toast('Monto inválido', 'warning');
     
     const submitBtn = document.querySelector('#paymentForm button[type="submit"]');
     const originalText = submitBtn.innerHTML;
@@ -451,6 +540,10 @@ async function guardarPago() {
         submitBtn.disabled = false;
     }
 }
+
+// ============================================
+// CONFIRMAR Y ELIMINAR PAGOS
+// ============================================
 
 function abrirModalPagar(paymentId) {
     selectedPaymentId = paymentId;
@@ -488,6 +581,10 @@ async function eliminarPago(id) {
     }
 }
 
-// Funciones globales para los onclick
+// ============================================
+// FUNCIONES GLOBALES
+// ============================================
+
 window.abrirModalPagar = abrirModalPagar;
 window.eliminarPago = eliminarPago;
+window.irPaginaPayments = irPaginaPayments;

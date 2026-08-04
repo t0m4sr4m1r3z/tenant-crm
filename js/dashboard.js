@@ -1,13 +1,12 @@
-// dashboard.js - Versión con pagos integrados
+// dashboard.js - Dashboard con pagos integrados – CORREGIDO
 let incomeChart = null;
 let statusChart = null;
 
-// API Client
 const API = {
     baseUrl: '/.netlify/functions',
     
     async request(endpoint) {
-        const token = localStorage.getItem('authToken');
+        const token = sessionStorage.getItem('authToken');
         
         try {
             const response = await fetch(`${this.baseUrl}${endpoint}`, {
@@ -15,7 +14,7 @@ const API = {
             });
             
             if (response.status === 401) {
-                localStorage.removeItem('authToken');
+                sessionStorage.removeItem('authToken');
                 window.location.href = '/login.html';
                 return null;
             }
@@ -37,13 +36,23 @@ const API = {
     
     async getPayments() {
         return this.request('/payments');
+    },
+
+    // Si el endpoint no existe, devolvemos array vacío
+    async getProperties() {
+        try {
+            return await this.request('/properties');
+        } catch (e) {
+            console.warn('getProperties fallback:', e);
+            return [];
+        }
     }
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('📊 Dashboard cargado');
     
-    const token = localStorage.getItem('authToken');
+    const token = sessionStorage.getItem('authToken');
     if (!token) {
         window.location.href = '/login.html';
         return;
@@ -56,7 +65,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         };
     }
     
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const user = JSON.parse(sessionStorage.getItem('user') || '{}');
     const userNameSpan = document.getElementById('userName');
     if (userNameSpan) {
         userNameSpan.textContent = user.name || 'Administrador';
@@ -72,39 +81,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
     
-    initSidebar();
-    await loadDashboardData();
+    AppSidebar.init();
     
-    // Auto-refresh cada 5 minutos
+    // Event listener para el selector de año
+    const yearSelect = document.getElementById('incomeYearSelect');
+    if (yearSelect) {
+        yearSelect.addEventListener('change', function() {
+            const year = parseInt(this.value);
+            const contracts = window.__dashboardContracts || [];
+            createIncomeChart(contracts, year);
+        });
+    }
+    
+    await loadDashboardData();
+    actualizarIndices();
+    
     setInterval(() => {
         loadDashboardData(true);
     }, 300000);
+    
+    setInterval(actualizarIndices, 3600000);
 });
-
-function initSidebar() {
-    const menuBtn = document.getElementById('menuBtn');
-    const sidebar = document.getElementById('sidebar');
-    const closeBtn = document.getElementById('closeSidebarBtn');
-    const overlay = document.getElementById('sidebarOverlay');
-    
-    if (menuBtn && sidebar) {
-        menuBtn.addEventListener('click', () => {
-            sidebar.classList.remove('hidden');
-        });
-    }
-    
-    if (closeBtn && sidebar) {
-        closeBtn.addEventListener('click', () => {
-            sidebar.classList.add('hidden');
-        });
-    }
-    
-    if (overlay && sidebar) {
-        overlay.addEventListener('click', () => {
-            sidebar.classList.add('hidden');
-        });
-    }
-}
 
 async function loadDashboardData(silent = false) {
     try {
@@ -112,10 +109,11 @@ async function loadDashboardData(silent = false) {
             showSkeletons();
         }
         
-        const [tenants, contracts, payments] = await Promise.all([
+        const [tenants, contracts, payments, properties] = await Promise.all([
             API.getTenants(),
             API.getContracts(),
-            API.getPayments()
+            API.getPayments(),
+            API.getProperties()
         ]);
         
         if (!silent) {
@@ -125,10 +123,14 @@ async function loadDashboardData(silent = false) {
         console.log('📦 Datos cargados:', { 
             tenants: tenants?.length || 0, 
             contracts: contracts?.length || 0,
-            payments: payments?.length || 0
+            payments: payments?.length || 0,
+            properties: properties?.length || 0
         });
         
-        processDashboardData(tenants || [], contracts || [], payments || []);
+        // Guardar contratos para uso en gráficos
+        window.__dashboardContracts = contracts || [];
+        
+        processDashboardData(tenants || [], contracts || [], payments || [], properties || []);
         
     } catch (error) {
         console.error('Error cargando datos:', error);
@@ -139,7 +141,7 @@ async function loadDashboardData(silent = false) {
 }
 
 function showSkeletons() {
-    const stats = ['totalTenants', 'activeContracts', 'upcomingIncreases', 'monthlyIncome'];
+    const stats = ['totalTenants', 'activeContracts', 'upcomingIncreases', 'monthlyIncome', 'totalProperties', 'availableProperties'];
     stats.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
@@ -148,18 +150,17 @@ function showSkeletons() {
     });
 }
 
-function processDashboardData(tenants, contracts, payments) {
+function processDashboardData(tenants, contracts, payments, properties) {
     const today = new Date();
     const currentMonth = today.getMonth();
     const currentYear = today.getFullYear();
     
-    // Estadísticas básicas
+    // ===== INQUILINOS =====
     document.getElementById('totalTenants').textContent = tenants.length;
     
     const activeContracts = contracts.filter(c => c && c.status === 'active');
     document.getElementById('activeContracts').textContent = activeContracts.length;
     
-    // Inquilinos nuevos este mes
     const newTenantsThisMonth = tenants.filter(t => {
         if (!t || !t.created_at) return false;
         const created = new Date(t.created_at);
@@ -167,7 +168,6 @@ function processDashboardData(tenants, contracts, payments) {
     }).length;
     document.getElementById('newTenantsThisMonth').textContent = `+${newTenantsThisMonth}`;
     
-    // Contratos por vencer
     const expiringSoon = activeContracts.filter(c => {
         if (!c || !c.end_date) return false;
         const endDate = new Date(c.end_date);
@@ -176,7 +176,12 @@ function processDashboardData(tenants, contracts, payments) {
     }).length;
     document.getElementById('expiringSoon').textContent = expiringSoon;
     
-    // Próximos aumentos
+    // ===== PROPIEDADES =====
+    document.getElementById('totalProperties').textContent = properties.length;
+    const available = properties.filter(p => p && p.status === 'disponible').length;
+    document.getElementById('availableProperties').textContent = available;
+    
+    // ===== AUMENTOS =====
     const upcomingIncreases = contracts.filter(c => {
         if (!c || !c.next_increase_date) return false;
         const nextDate = new Date(c.next_increase_date);
@@ -192,7 +197,7 @@ function processDashboardData(tenants, contracts, payments) {
         document.getElementById('nextIncreaseDate').textContent = '-';
     }
     
-    // Ingresos mensuales (de pagos reales)
+    // ===== INGRESOS =====
     const monthlyIncome = (payments || [])
         .filter(p => {
             if (!p.paid_at) return false;
@@ -203,19 +208,19 @@ function processDashboardData(tenants, contracts, payments) {
     
     animateNumber('monthlyIncome', 0, monthlyIncome, 'currency');
     
-    // Procesar pagos para las tarjetas adicionales
+    // ===== PAGOS (tarjetas adicionales) =====
     procesarPagosDashboard(payments || []);
     
-    // Crear gráficos (con timeout para asegurar que el DOM está listo)
+    // ===== GRÁFICOS =====
     setTimeout(() => {
         createIncomeChart(contracts, currentYear);
         createStatusChart(contracts);
     }, 100);
     
-    // Actividad reciente
+    // ===== ACTIVIDAD RECIENTE =====
     renderRecentActivity(tenants, contracts);
     
-    // Próximos aumentos lista
+    // ===== PRÓXIMOS AUMENTOS =====
     renderUpcomingList(upcomingIncreases);
 }
 
@@ -226,7 +231,6 @@ function procesarPagosDashboard(payments) {
     const sevenDaysFromNow = new Date();
     sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
     
-    // Pagos vencidos
     const pagosVencidos = payments.filter(p => {
         if (p.status !== 'pending') return false;
         const dueDate = new Date(p.due_date);
@@ -235,7 +239,6 @@ function procesarPagosDashboard(payments) {
     
     const totalVencido = pagosVencidos.reduce((sum, p) => sum + (parseFloat(p.total_amount) || 0), 0);
     
-    // Pagos pendientes próximos
     const pagosPendientes = payments.filter(p => {
         if (p.status !== 'pending') return false;
         const dueDate = new Date(p.due_date);
@@ -244,7 +247,6 @@ function procesarPagosDashboard(payments) {
     
     const totalPendiente = pagosPendientes.reduce((sum, p) => sum + (parseFloat(p.total_amount) || 0), 0);
     
-    // Pagos del mes
     const pagosMes = payments.filter(p => {
         if (p.status !== 'paid') return false;
         const paidDate = new Date(p.paid_at || p.updated_at);
@@ -253,7 +255,6 @@ function procesarPagosDashboard(payments) {
     
     const totalMes = pagosMes.reduce((sum, p) => sum + (parseFloat(p.total_amount) || 0), 0);
     
-    // Actualizar o crear tarjetas
     actualizarTarjetasPagos({
         vencidos: pagosVencidos.length,
         totalVencido,
@@ -265,32 +266,27 @@ function procesarPagosDashboard(payments) {
 }
 
 function actualizarTarjetasPagos(datos) {
-    // Verificar si las tarjetas ya existen
     let pagosVencidosEl = document.getElementById('pagosVencidos');
     
     if (!pagosVencidosEl) {
         crearTarjetasPagos();
-        // Reobtener referencias
         pagosVencidosEl = document.getElementById('pagosVencidos');
     }
     
-    // Actualizar valores
     if (pagosVencidosEl) {
         document.getElementById('pagosVencidos').textContent = datos.vencidos;
-        document.getElementById('totalVencido').textContent = UI.formatCurrency(datos.totalVencido);
+        document.getElementById('totalVencido').textContent = AppUtils.formatCurrency(datos.totalVencido);
         document.getElementById('pagosPendientes').textContent = datos.pendientes;
-        document.getElementById('totalPendiente').textContent = UI.formatCurrency(datos.totalPendiente);
+        document.getElementById('totalPendiente').textContent = AppUtils.formatCurrency(datos.totalPendiente);
         document.getElementById('pagosMes').textContent = datos.mes;
-        document.getElementById('totalMes').textContent = UI.formatCurrency(datos.totalMes);
+        document.getElementById('totalMes').textContent = AppUtils.formatCurrency(datos.totalMes);
     }
 }
 
 function crearTarjetasPagos() {
-    // Buscar el contenedor de estadísticas
     const statsGrid = document.querySelector('.grid.grid-cols-1');
     if (!statsGrid) return;
     
-    // Crear un nuevo contenedor para las tarjetas de pagos
     const pagosRow = document.createElement('div');
     pagosRow.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-6';
     pagosRow.innerHTML = `
@@ -343,7 +339,6 @@ function crearTarjetasPagos() {
         </div>
     `;
     
-    // Insertar después del grid de estadísticas
     statsGrid.parentNode.insertBefore(pagosRow, statsGrid.nextSibling);
 }
 
@@ -351,14 +346,13 @@ function animateNumber(elementId, start, end, format = 'number') {
     const element = document.getElementById(elementId);
     if (!element) return;
     
-    element.textContent = format === 'currency' ? UI.formatCurrency(end) : end.toString();
+    element.textContent = format === 'currency' ? AppUtils.formatCurrency(end) : end.toString();
 }
 
 function createIncomeChart(contracts, year) {
     const canvas = document.getElementById('incomeChart');
     if (!canvas) return;
     
-    // Empty state handling via DOM instead of raw canvas to prevent resize bug
     let emptyStateDiv = document.getElementById('incomeChartEmptyState');
     if (!emptyStateDiv) {
         emptyStateDiv = document.createElement('div');
@@ -368,17 +362,18 @@ function createIncomeChart(contracts, year) {
         canvas.parentElement.appendChild(emptyStateDiv);
     }
     
-    // Mostrar u ocultar canvas/empty state
     const monthlyData = new Array(12).fill(0);
-    contracts.filter(c => c && c.status === 'active' && c.start_date).forEach(contract => {
-        try {
-            const startDate = new Date(contract.start_date);
-            if (startDate.getFullYear() === year) {
-                const month = startDate.getMonth();
-                monthlyData[month] += parseFloat(contract.base_amount) || 0;
-            }
-        } catch (e) {}
-    });
+    if (Array.isArray(contracts)) {
+        contracts.filter(c => c && c.status === 'active' && c.start_date).forEach(contract => {
+            try {
+                const startDate = new Date(contract.start_date);
+                if (startDate.getFullYear() === year) {
+                    const month = startDate.getMonth();
+                    monthlyData[month] += parseFloat(contract.base_amount) || 0;
+                }
+            } catch (e) {}
+        });
+    }
     
     const hasData = monthlyData.some(v => v > 0);
     
@@ -401,7 +396,7 @@ function createIncomeChart(contracts, year) {
     }
     
     const gradient = ctx.createLinearGradient(0, 0, 0, 400);
-    gradient.addColorStop(0, 'rgba(79, 70, 229, 0.4)'); // primary-600
+    gradient.addColorStop(0, 'rgba(79, 70, 229, 0.4)');
     gradient.addColorStop(1, 'rgba(79, 70, 229, 0.0)');
     
     incomeChart = new Chart(ctx, {
@@ -439,7 +434,7 @@ function createIncomeChart(contracts, year) {
                         label: function(context) {
                             let label = context.dataset.label || '';
                             if (label) { label += ': '; }
-                            if (context.parsed.y !== null) { label += UI.formatCurrency(context.parsed.y); }
+                            if (context.parsed.y !== null) { label += AppUtils.formatCurrency(context.parsed.y); }
                             return label;
                         }
                     }
@@ -454,7 +449,7 @@ function createIncomeChart(contracts, year) {
                     beginAtZero: true,
                     border: { display: false },
                     grid: { color: 'rgba(2f, 41, 59, 0.05)', drawBorder: false },
-                    ticks: { callback: value => UI.formatCurrency(value), font: { family: 'Inter', size: 11 }, color: '#64748b' }
+                    ticks: { callback: value => AppUtils.formatCurrency(value), font: { family: 'Inter', size: 11 }, color: '#64748b' }
                 },
                 x: {
                     border: { display: false },
@@ -480,11 +475,18 @@ function createStatusChart(contracts) {
     }
     
     const statusCounts = {
-        active: contracts.filter(c => c && c.status === 'active').length,
-        pending: contracts.filter(c => c && c.status === 'pending').length,
-        expired: contracts.filter(c => c && c.status === 'expired').length,
-        terminated: contracts.filter(c => c && c.status === 'terminated').length
+        active: 0,
+        pending: 0,
+        expired: 0,
+        terminated: 0
     };
+    
+    if (Array.isArray(contracts)) {
+        statusCounts.active = contracts.filter(c => c && c.status === 'active').length;
+        statusCounts.pending = contracts.filter(c => c && c.status === 'pending').length;
+        statusCounts.expired = contracts.filter(c => c && c.status === 'expired').length;
+        statusCounts.terminated = contracts.filter(c => c && c.status === 'terminated').length;
+    }
     
     const hasData = Object.values(statusCounts).some(v => v > 0);
     
@@ -542,7 +544,6 @@ function createStatusChart(contracts) {
     
     const legend = document.getElementById('statusLegend');
     if (legend) {
-        const total = Object.values(statusCounts).reduce((a, b) => a + b, 0);
         legend.innerHTML = `
             <div class="flex items-center"><span class="w-3 h-3 bg-emerald-500 rounded-full mr-2 shadow-sm"></span>Activos: <span class="font-bold ml-1 text-slate-700">${statusCounts.active}</span></div>
             <div class="flex items-center"><span class="w-3 h-3 bg-amber-500 rounded-full mr-2 shadow-sm"></span>Pendientes: <span class="font-bold ml-1 text-slate-700">${statusCounts.pending}</span></div>
@@ -587,7 +588,7 @@ function renderRecentActivity(tenants, contracts) {
     
     tbody.innerHTML = activities.slice(0, 5).map(a => `
         <tr class="border-b">
-            <td class="py-3">${escapeHtml(a.name)}</td>
+            <td class="py-3">${AppUtils.escapeHtml(a.name)}</td>
             <td class="py-3">${a.action}</td>
             <td class="py-3">${a.date.toLocaleDateString()}</td>
             <td class="py-3"><span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">${a.status}</span></td>
@@ -612,8 +613,8 @@ function renderUpcomingList(increases) {
             <div class="bg-blue-50 p-3 rounded-lg">
                 <div class="flex justify-between items-center">
                     <div>
-                        <p class="font-medium">${escapeHtml(inc.tenant_name || 'N/A')}</p>
-                        <p class="text-sm text-gray-600">${UI.formatCurrency(inc.base_amount)}</p>
+                        <p class="font-medium">${AppUtils.escapeHtml(inc.tenant_name || 'N/A')}</p>
+                        <p class="text-sm text-gray-600">${AppUtils.formatCurrency(inc.base_amount)}</p>
                     </div>
                     <div class="text-right">
                         <p class="font-semibold">${date.toLocaleDateString()}</p>
@@ -625,54 +626,12 @@ function renderUpcomingList(increases) {
     }).join('');
 }
 
-function escapeHtml(text) {
-    if (!text) return '';
-    return String(text).replace(/[&<>"']/g, function(m) {
-        return {
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#039;'
-        }[m];
-    });
-}
-
-async function actualizarIndices() {
-    try {
-        const token = localStorage.getItem('authToken');
-        const response = await fetch('/.netlify/functions/indices', {
-            headers: { 'Authorization': token }
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            
-            if (data.ipc) {
-                document.getElementById('ipcValue').textContent = `${data.ipc.monthly}%`;
-                document.getElementById('ipcDate').textContent = `Actualizado: ${UI.formatDate(data.ipc.date)}`;
-                document.getElementById('indicesUpdateTime').textContent = `Última actualización: ${new Date(data.updatedAt).toLocaleTimeString()}`;
-            }
-            
-            if (data.icl) {
-                document.getElementById('iclValue').textContent = `${data.icl.monthly}%`;
-                document.getElementById('iclDate').textContent = `Actualizado: ${UI.formatDate(data.icl.date)}`;
-            }
-            
-            UI.toast('Índices actualizados correctamente', 'success');
-        }
-    } catch (error) {
-        console.error('Error actualizando índices:', error);
-        UI.toast('Error al actualizar índices', 'error');
-    }
-}
-
 // ============================================
 // ÍNDICES ECONÓMICOS EN DASHBOARD
 // ============================================
 
-async function actualizarIndices() {
-    const indices = getIndices();
+function actualizarIndices() {
+    const indices = window.getIndices ? window.getIndices() : { ipc: 2.0, icl: 2.1, ipcFecha: '2026-03', iclFecha: '2026-03' };
     
     const ipcValue = document.getElementById('ipcValue');
     const iclValue = document.getElementById('iclValue');
@@ -682,27 +641,202 @@ async function actualizarIndices() {
     
     if (ipcValue) ipcValue.textContent = `${indices.ipc}%`;
     if (iclValue) iclValue.textContent = `${indices.icl}%`;
-    if (ipcDate) ipcDate.textContent = `Actualizado: ${indices.ipcFecha}`;
-    if (iclDate) iclDate.textContent = `Actualizado: ${indices.iclFecha}`;
+    if (ipcDate) ipcDate.textContent = `Actualizado: ${indices.ipcFecha || '2026-03'}`;
+    if (iclDate) iclDate.textContent = `Actualizado: ${indices.iclFecha || '2026-03'}`;
     if (indicesUpdateTime) {
-        indicesUpdateTime.textContent = `Última actualización: ${new Date(window.INDICES_CONFIG?.ultimaActualizacion).toLocaleTimeString()}`;
+        const ultima = window.INDICES_CONFIG?.ultimaActualizacion || new Date().toISOString();
+        indicesUpdateTime.textContent = `Última actualización: ${new Date(ultima).toLocaleTimeString()}`;
     }
     
     console.log('📊 Dashboard actualizado con índices:', indices);
 }
 
-// Escuchar cambios en los índices
 window.addEventListener('indicesActualizados', () => {
     actualizarIndices();
 });
 
-// Modificar la función existente actualizarIndices del dashboard
-// Si ya existe, reemplázala o asegúrate de que llame a getIndices()
+window.actualizarIndices = async function() {
+    try {
+        const token = sessionStorage.getItem('authToken');
+        const response = await fetch('/.netlify/functions/indices', {
+            headers: { 'Authorization': token }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (window.guardarIndices) {
+                window.guardarIndices(data.ipc?.monthly, data.icl?.monthly, data.ipc?.date, data.icl?.date);
+            }
+            actualizarIndices();
+            UI.toast('Índices actualizados correctamente', 'success');
+        } else {
+            UI.toast('No se pudo actualizar los índices', 'warning');
+        }
+    } catch (error) {
+        console.error('Error actualizando índices:', error);
+        UI.toast('Error al actualizar índices', 'error');
+    }
+};
 
-// Llamar al cargar el dashboard
-document.addEventListener('DOMContentLoaded', () => {
-    // ... código existente ...
-    actualizarIndices();
-    // Actualizar cada hora
-    setInterval(actualizarIndices, 3600000);
+// ============================================
+// RECORDATORIOS Y ALERTAS
+// ============================================
+
+let lastReminderSent = localStorage.getItem('lastReminderSent') || null;
+let reminderData = { overduePayments: 0, expiringContracts: 0, upcomingIncreases: 0 };
+
+function actualizarRecordatorios() {
+    const token = sessionStorage.getItem('authToken');
+    if (!token) return;
+
+    Promise.all([
+        API.getPayments(),
+        API.getContracts()
+    ]).then(([payments, contracts]) => {
+        const today = new Date();
+        const thirtyDaysFromNow = new Date();
+        thirtyDaysFromNow.setDate(today.getDate() + 30);
+
+        const overduePayments = (payments || []).filter(p => 
+            p.status === 'pending' && new Date(p.due_date) < today
+        ).length;
+
+        const expiringContracts = (contracts || []).filter(c => 
+            c.status === 'active' && c.end_date && new Date(c.end_date) <= thirtyDaysFromNow && new Date(c.end_date) >= today
+        ).length;
+
+        const upcomingIncreases = (contracts || []).filter(c => 
+            c.next_increase_date && new Date(c.next_increase_date) <= thirtyDaysFromNow && new Date(c.next_increase_date) >= today
+        ).length;
+
+        reminderData = { overduePayments, expiringContracts, upcomingIncreases };
+
+        document.getElementById('reminderOverduePayments').textContent = overduePayments;
+        document.getElementById('reminderExpiringContracts').textContent = expiringContracts;
+        document.getElementById('reminderUpcomingIncreases').textContent = upcomingIncreases;
+
+        if (lastReminderSent) {
+            const date = new Date(lastReminderSent);
+            document.getElementById('lastReminderDate').textContent = `Último envío: ${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+        }
+
+    }).catch(error => {
+        console.error('Error actualizando recordatorios:', error);
+    });
+}
+
+function generarResumenRecordatorios() {
+    const today = new Date().toLocaleDateString('es-ES', {
+        year: 'numeric', month: 'long', day: 'numeric'
+    });
+
+    return new Promise((resolve) => {
+        Promise.all([
+            API.getPayments(),
+            API.getContracts()
+        ]).then(([payments, contracts]) => {
+            const now = new Date();
+            const thirtyDaysFromNow = new Date();
+            thirtyDaysFromNow.setDate(now.getDate() + 30);
+
+            const overdue = (payments || []).filter(p => p.status === 'pending' && new Date(p.due_date) < now);
+            const expiring = (contracts || []).filter(c => c.status === 'active' && c.end_date && new Date(c.end_date) <= thirtyDaysFromNow && new Date(c.end_date) >= now);
+            const increases = (contracts || []).filter(c => c.next_increase_date && new Date(c.next_increase_date) <= thirtyDaysFromNow && new Date(c.next_increase_date) >= now);
+
+            let message = `📋 RESUMEN DE RECORDATORIOS - ${today}\n\n`;
+            message += `========================================\n`;
+
+            if (overdue.length > 0) {
+                message += `⚠️ PAGOS VENCIDOS (${overdue.length}):\n`;
+                overdue.forEach(p => {
+                    const tenant = p.tenant_name || `Contrato #${p.contract_id}`;
+                    const amount = AppUtils.formatCurrency(p.total_amount || p.amount || 0);
+                    const days = Math.ceil((now - new Date(p.due_date)) / (1000 * 60 * 60 * 24));
+                    message += `   - ${tenant}: ${amount} (vencido hace ${days} días)\n`;
+                });
+                message += `\n`;
+            }
+
+            if (expiring.length > 0) {
+                message += `⏰ CONTRATOS POR VENCER (${expiring.length}):\n`;
+                expiring.forEach(c => {
+                    const tenant = c.tenant_name || `Contrato #${c.id}`;
+                    const days = Math.ceil((new Date(c.end_date) - now) / (1000 * 60 * 60 * 24));
+                    message += `   - ${tenant}: vence en ${days} días (${new Date(c.end_date).toLocaleDateString()})\n`;
+                });
+                message += `\n`;
+            }
+
+            if (increases.length > 0) {
+                message += `📈 AUMENTOS PROGRAMADOS (${increases.length}):\n`;
+                increases.forEach(c => {
+                    const tenant = c.tenant_name || `Contrato #${c.id}`;
+                    const days = Math.ceil((new Date(c.next_increase_date) - now) / (1000 * 60 * 60 * 24));
+                    const amount = AppUtils.formatCurrency(c.base_amount || 0);
+                    const newAmount = AppUtils.formatCurrency(c.base_amount * (1 + (parseFloat(c.increase_value || 0) / 100)));
+                    message += `   - ${tenant}: ${amount} → ${newAmount} (en ${days} días)\n`;
+                });
+                message += `\n`;
+            }
+
+            if (overdue.length === 0 && expiring.length === 0 && increases.length === 0) {
+                message += `✅ No hay eventos pendientes. Todo está al día.\n`;
+            }
+
+            message += `\n========================================\n`;
+            message += `📧 Este es un resumen automático de Tenant CRM.\n`;
+            message += `💡 Para más detalles, ingresa al sistema.\n`;
+
+            resolve(message);
+        }).catch(error => {
+            console.error('Error generando resumen:', error);
+            resolve('Error al generar el resumen. Intenta nuevamente.');
+        });
+    });
+}
+
+function enviarRecordatoriosEmail() {
+    const statusDiv = document.getElementById('reminderStatus');
+    statusDiv.textContent = '⏳ Generando resumen...';
+    statusDiv.classList.remove('hidden');
+
+    generarResumenRecordatorios().then(body => {
+        const subject = `📋 Resumen de recordatorios - ${new Date().toLocaleDateString('es-ES')}`;
+        const encodedSubject = encodeURIComponent(subject);
+        const encodedBody = encodeURIComponent(body);
+
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        let mailtoLink;
+
+        if (isMobile) {
+            mailtoLink = `intent://mailto:?subject=${encodedSubject}&body=${encodedBody}#Intent;scheme=mailto;package=com.google.android.gm;end`;
+        } else {
+            mailtoLink = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodedSubject}&body=${encodedBody}`;
+        }
+
+        window.open(mailtoLink, '_blank');
+        statusDiv.textContent = '✅ Recordatorios enviados (abriendo correo)';
+        statusDiv.classList.remove('hidden');
+        statusDiv.style.color = '#10b981';
+
+        const now = new Date().toISOString();
+        localStorage.setItem('lastReminderSent', now);
+        lastReminderSent = now;
+        document.getElementById('lastReminderDate').textContent = `Último envío: ${new Date(now).toLocaleDateString()} ${new Date(now).toLocaleTimeString()}`;
+
+        setTimeout(() => {
+            statusDiv.classList.add('hidden');
+        }, 5000);
+    });
+}
+
+// Inicializar recordatorios
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(() => {
+        if (document.getElementById('reminderOverduePayments')) {
+            actualizarRecordatorios();
+            document.getElementById('sendRemindersBtn').addEventListener('click', enviarRecordatoriosEmail);
+            document.getElementById('refreshRemindersBtn').addEventListener('click', actualizarRecordatorios);
+        }
+    }, 1000);
 });

@@ -1,4 +1,4 @@
-// settings.js - Gestión de configuración
+// settings.js - Gestión de configuración – CORREGIDO
 document.addEventListener('DOMContentLoaded', () => {
     if (!window.AUTH) {
         console.error('Auth module not loaded');
@@ -8,37 +8,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const user = window.AUTH.getCurrentUser();
     if (!user) return;
     
-    initSidebar();
+    // Usar AppSidebar en lugar de initSidebar local
+    if (window.AppSidebar) {
+        AppSidebar.init();
+    }
+    
     loadSettings();
     initSettingsForm();
     initIndicesPanel();
     initNotificationsConfig();
 });
-
-function initSidebar() {
-    const menuBtn = document.getElementById('menuBtn');
-    const sidebar = document.getElementById('sidebar');
-    const closeBtn = document.getElementById('closeSidebarBtn');
-    const overlay = document.getElementById('sidebarOverlay');
-    
-    if (menuBtn && sidebar) {
-        menuBtn.addEventListener('click', () => {
-            sidebar.classList.remove('hidden');
-        });
-    }
-    
-    if (closeBtn && sidebar) {
-        closeBtn.addEventListener('click', () => {
-            sidebar.classList.add('hidden');
-        });
-    }
-    
-    if (overlay && sidebar) {
-        overlay.addEventListener('click', () => {
-            sidebar.classList.add('hidden');
-        });
-    }
-}
 
 function loadSettings() {
     const settings = JSON.parse(localStorage.getItem('appSettings')) || {
@@ -134,7 +113,6 @@ function initNotificationsConfig() {
 // CONFIGURACIÓN DE ÍNDICES ECONÓMICOS (VERSIÓN CENTRALIZADA)
 // ============================================
 
-// Cargar índices actuales al iniciar
 async function cargarIndicesActuales() {
     const indices = window.getIndices ? window.getIndices() : { ipc: 2.0, icl: 2.1, ipcFecha: '2026-03', iclFecha: '2026-03' };
     
@@ -160,7 +138,6 @@ async function cargarIndicesActuales() {
     }
 }
 
-// Guardar índices manuales usando el sistema central
 function guardarIndicesManuales() {
     const ipcInput = document.getElementById('ipcMensual');
     const ipcFechaInput = document.getElementById('ipcFecha');
@@ -178,15 +155,13 @@ function guardarIndicesManuales() {
     const iclFecha = iclFechaInput?.value || '2026-03';
     
     if (isNaN(ipc) || isNaN(icl)) {
-        UI.toast('Por favor ingresa valores válidos', 'error');
+        if (window.UI) UI.toast('Por favor ingresa valores válidos', 'error');
         return;
     }
     
-    // Usar la función global de configuración si existe
     if (window.guardarIndices) {
         window.guardarIndices(ipc, icl, ipcFecha, iclFecha);
     } else {
-        // Fallback manual
         const indicesData = {
             ipc: { mensual: ipc, fecha: ipcFecha },
             icl: { mensual: icl, fecha: iclFecha },
@@ -203,18 +178,14 @@ function guardarIndicesManuales() {
         }, 3000);
     }
     
-    UI.toast(`IPC: ${ipc}% / ICL: ${icl}% guardados`, 'success');
+    if (window.UI) UI.toast(`IPC: ${ipc}% / ICL: ${icl}% guardados`, 'success');
     
-    // Actualizar display
     cargarIndicesActuales();
-    
-    // Disparar evento para actualizar otros componentes
     if (window.dispatchEvent) {
         window.dispatchEvent(new CustomEvent('indicesActualizados'));
     }
 }
 
-// Sincronizar con API usando el sistema central
 async function sincronizarConAPI() {
     const statusEl = document.getElementById('indicesStatus');
     if (statusEl) {
@@ -227,8 +198,7 @@ async function sincronizarConAPI() {
         if (window.sincronizarConAPI) {
             success = await window.sincronizarConAPI();
         } else {
-            // Fallback: llamar directamente a la API
-            const token = localStorage.getItem('authToken');
+            const token = sessionStorage.getItem('authToken');
             if (!token) throw new Error('No autenticado');
             
             const response = await fetch('/.netlify/functions/indices', {
@@ -251,7 +221,7 @@ async function sincronizarConAPI() {
                     if (statusEl) statusEl.innerHTML = '';
                 }, 3000);
             }
-            UI.toast('Índices sincronizados correctamente', 'success');
+            if (window.UI) UI.toast('Índices sincronizados correctamente', 'success');
         } else {
             throw new Error('Error en la sincronización');
         }
@@ -264,19 +234,17 @@ async function sincronizarConAPI() {
                 if (statusEl) statusEl.innerHTML = '';
             }, 3000);
         }
-        UI.toast('Error al sincronizar con API', 'error');
+        if (window.UI) UI.toast('Error al sincronizar con API', 'error');
     }
     
     await cargarIndicesActuales();
 }
 
-// Inicializar panel de índices
 function initIndicesPanel() {
     const guardarBtn = document.getElementById('guardarIndicesBtn');
     const sincronizarBtn = document.getElementById('sincronizarIndicesBtn');
     
     if (guardarBtn) {
-        // Remover event listeners anteriores para evitar duplicados
         guardarBtn.removeEventListener('click', guardarIndicesManuales);
         guardarBtn.addEventListener('click', guardarIndicesManuales);
     }
@@ -286,11 +254,9 @@ function initIndicesPanel() {
         sincronizarBtn.addEventListener('click', sincronizarConAPI);
     }
     
-    // Escuchar cambios en los índices desde otros componentes
     window.addEventListener('indicesActualizados', () => {
         cargarIndicesActuales();
     });
     
-    // Cargar valores guardados
     cargarIndicesActuales();
 }

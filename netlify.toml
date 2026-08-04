@@ -60,7 +60,9 @@
   to = "/.netlify/functions/:splat"
   status = 200
 
-# Fallback para páginas no encontradas
+# Fallback para páginas no encontradas (SPA)
+# Redirige todas las rutas no encontradas a index.html,
+# que a su vez redirige a login.html.
 [[redirects]]
   from = "/*"
   to = "/index.html"

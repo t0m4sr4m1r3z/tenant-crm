@@ -12,23 +12,21 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/css/style.css">
     <!-- PWA Meta Tags -->
-<link rel="icon" type="image/png" href="/icons/icon-192x192.png">
-<link rel="manifest" href="/site.webmanifest">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Tenant CRM">
-<meta name="theme-color" content="#4f46e5">
-<meta name="mobile-web-app-capable" content="yes">
-
-<!-- iOS Icons -->
-<link rel="apple-touch-icon" href="/icons/icon-192x192.png">
-<link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png">
-<link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192x192.png">
-<link rel="apple-touch-icon" sizes="167x167" href="/icons/icon-192x192.png">
-
-<!-- Windows Tiles -->
-<meta name="msapplication-TileColor" content="#4f46e5">
-<meta name="msapplication-TileImage" content="/icons/icon-144x144.png">
+    <link rel="icon" type="image/png" href="/icons/icon-192x192.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Tenant CRM">
+    <meta name="theme-color" content="#4f46e5">
+    <meta name="mobile-web-app-capable" content="yes">
+    <!-- iOS Icons -->
+    <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192x192.png">
+    <link rel="apple-touch-icon" sizes="167x167" href="/icons/icon-192x192.png">
+    <!-- Windows Tiles -->
+    <meta name="msapplication-TileColor" content="#4f46e5">
+    <meta name="msapplication-TileImage" content="/icons/icon-144x144.png">
 </head>
 <body class="bg-slate-50 min-h-screen font-sans selection:bg-primary-500 selection:text-white">
     <!-- Navigation Bar -->
@@ -36,13 +34,16 @@
         <div class="px-4 max-w-7xl mx-auto">
             <div class="flex justify-between items-center h-16">
                 <div class="flex items-center">
-                    <button id="menuBtn" class="text-slate-600 hover:text-primary-600 focus:outline-none transition-colors">
+                    <button id="menuBtn" class="text-slate-600 hover:text-primary-600 focus:outline-none transition-colors" aria-label="Abrir menú lateral">
                         <i class="fas fa-bars text-xl"></i>
                     </button>
                     <h1 class="text-xl font-display font-bold text-slate-800 ml-3 md:ml-0 bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-purple-600 hidden sm:block">Tenant CRM</h1>
                 </div>
                 <div class="flex items-center space-x-3">
-                    <button id="notificationsBtn" class="text-slate-500 hover:text-primary-600 relative p-2 rounded-xl hover:bg-slate-100/50 transition-all">
+                    <button id="darkModeToggle" class="text-slate-500 hover:text-primary-600 relative p-2 rounded-xl hover:bg-slate-100/50 transition-all" aria-label="Alternar modo oscuro">
+                        <i id="darkModeIcon" class="fas fa-moon text-xl"></i>
+                    </button>
+                    <button id="notificationsBtn" class="text-slate-500 hover:text-primary-600 relative p-2 rounded-xl hover:bg-slate-100/50 transition-all" aria-label="Notificaciones">
                         <i class="fas fa-bell text-xl"></i>
                         <span id="notificationBadge" class="notification-badge absolute 0 right-0 bg-red-500 text-white text-[10px] font-bold rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center hidden border-2 border-white">0</span>
                     </button>
@@ -55,13 +56,16 @@
         </div>
     </nav>
 
-    <!-- Sidebar (copiar el sidebar actualizado de arriba) -->
-    <div id="sidebar" class="fixed inset-0 z-40 hidden">
+    <!-- Breadcrumbs -->
+    <div id="breadcrumbContainer" class="max-w-7xl mx-auto px-4"></div>
+
+    <!-- Sidebar -->
+    <div id="sidebar" class="fixed inset-0 z-40 hidden" role="navigation" aria-label="Menú lateral">
         <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" id="sidebarOverlay"></div>
         <div class="absolute left-0 top-0 bottom-0 w-72 glass-card shadow-2xl transform transition-transform duration-300">
             <div class="p-6 border-b border-slate-200/50 flex justify-between items-center">
                 <h2 class="text-xl font-display font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-purple-600">Tenant CRM</h2>
-                <button id="closeSidebarBtn" class="text-slate-400 hover:text-slate-600 transition-colors">
+                <button id="closeSidebarBtn" class="text-slate-400 hover:text-slate-600 transition-colors" aria-label="Cerrar menú lateral">
                     <i class="fas fa-times text-xl"></i>
                 </button>
             </div>
@@ -76,16 +80,22 @@
                     <li><a href="/owners.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
                         <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-user-tie"></i></div><span>Propietarios</span>
                     </a></li>
+                    <li><a href="/properties.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-building"></i></div><span>Propiedades</span>
+                    </a></li>
                     <li><a href="/contracts.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
                         <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-file-contract"></i></div><span>Contratos</span>
                     </a></li>
-                    <li><a href="/payments.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
-                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-dollar-sign"></i></div><span>Pagos</span>
+                    <li><a href="/payments.html" class="flex items-center p-3 bg-primary-50 text-primary-600 rounded-xl transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-primary-100 mr-2"><i class="fas fa-dollar-sign"></i></div><span>Pagos</span>
                     </a></li>
-                    <li><a href="/settings.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                    <li><a href="/calendar.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-calendar-alt"></i></div><span>Calendario</span>
+                    </a></li>
+                    <li><a href="/settings.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors" data-required-role="admin">
                         <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-cog"></i></div><span>Configuración</span>
                     </a></li>
-                    <li><a href="/reports.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors">
+                    <li><a href="/reports.html" class="flex items-center p-3 hover:bg-primary-50 rounded-xl text-slate-600 hover:text-primary-600 transition-colors" data-required-role="admin">
                         <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 mr-2"><i class="fas fa-chart-bar"></i></div><span>Reportes</span>
                     </a></li>
                 </ul>
@@ -101,8 +111,8 @@
                 <h2 class="text-2xl font-bold text-gray-800">💰 Cobranzas y Pagos</h2>
                 <p class="text-gray-500 text-sm mt-1">Gestiona los pagos de alquiler y controla la morosidad</p>
             </div>
-            <button id="registerPaymentBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 transition">
-                <i class="fas fa-plus"></i>
+            <button id="registerPaymentBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 transition" data-action="create">
+                <i class="fas fa-plus" aria-hidden="true"></i>
                 <span>Registrar Pago</span>
             </button>
         </div>
@@ -179,7 +189,7 @@
                     <button id="applyFiltersBtn" class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
                         <i class="fas fa-filter mr-2"></i>Filtrar
                     </button>
-                    <button id="clearFiltersBtn" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition" title="Limpiar filtros">
+                    <button id="clearFiltersBtn" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition" title="Limpiar filtros" aria-label="Limpiar filtros">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
@@ -215,14 +225,14 @@
     </main>
 
     <!-- Modal para registrar pago -->
-    <div id="paymentModal" class="fixed inset-0 z-30 hidden overflow-y-auto">
+    <div id="paymentModal" class="fixed inset-0 z-30 hidden overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
         <div class="flex items-center justify-center min-h-screen p-4">
             <div class="fixed inset-0 bg-gray-600 bg-opacity-75" id="modalOverlay"></div>
             
             <div class="relative bg-white rounded-xl shadow-xl max-w-md w-full">
                 <div class="sticky top-0 bg-white px-6 py-4 border-b flex justify-between items-center">
                     <h3 class="text-lg font-semibold" id="modalTitle">Registrar Nuevo Pago</h3>
-                    <button id="closeModalBtn" class="text-gray-500 hover:text-gray-700">
+                    <button id="closeModalBtn" class="text-gray-500 hover:text-gray-700" aria-label="Cerrar modal">
                         <i class="fas fa-times text-xl"></i>
                     </button>
                 </div>
@@ -232,9 +242,10 @@
                     
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Contrato <span class="text-red-500">*</span></label>
-                        <select id="paymentContractId" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                        <select id="paymentContractId" required aria-required="true" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                             <option value="">Seleccionar contrato...</option>
                         </select>
+                        <div class="field-error text-red-500 text-sm mt-1 hidden"></div>
                     </div>
                     
                     <div>
@@ -251,7 +262,8 @@
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Monto <span class="text-red-500">*</span></label>
-                            <input type="number" id="paymentAmount" required min="0" step="0.01" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <input type="number" id="paymentAmount" required aria-required="true" min="0" step="0.01" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <div class="field-error text-red-500 text-sm mt-1 hidden"></div>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Comisión</label>
@@ -262,7 +274,8 @@
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Fecha Vencimiento <span class="text-red-500">*</span></label>
-                            <input type="date" id="paymentDueDate" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <input type="date" id="paymentDueDate" required aria-required="true" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <div class="field-error text-red-500 text-sm mt-1 hidden"></div>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Fecha Pago</label>
@@ -300,11 +313,11 @@
     </div>
 
     <!-- Modal para marcar como pagado -->
-    <div id="payModal" class="fixed inset-0 z-30 hidden overflow-y-auto">
+    <div id="payModal" class="fixed inset-0 z-30 hidden overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="payModalTitle">
         <div class="flex items-center justify-center min-h-screen p-4">
             <div class="fixed inset-0 bg-gray-600 bg-opacity-75"></div>
             <div class="relative bg-white rounded-xl shadow-xl max-w-md w-full p-6">
-                <h3 class="text-lg font-semibold mb-4">Confirmar Pago</h3>
+                <h3 id="payModalTitle" class="text-lg font-semibold mb-4">Confirmar Pago</h3>
                 <p class="text-gray-600 mb-6">¿Estás seguro de marcar este pago como <span class="font-bold text-green-600">pagado</span>?</p>
                 <div class="flex gap-3">
                     <button id="cancelPayBtn" class="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition">Cancelar</button>
@@ -314,8 +327,12 @@
         </div>
     </div>
 
-    <script src="/js/auth.js"></script>
+    <script src="/js/shared/utils.js"></script>
+    <script src="/js/shared/api-cache.js"></script>
+    <script src="/js/shared/sidebar.js"></script>
+    <script src="/js/shared/breadcrumbs.js"></script>
     <script src="/js/ui.js"></script>
+    <script src="/js/auth.js"></script>
     <script src="/js/indices-config.js"></script>
     <script src="/js/notifications.js"></script>
     <script src="/js/push-notifications.js"></script>
