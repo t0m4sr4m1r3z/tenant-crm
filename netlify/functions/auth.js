@@ -27,7 +27,7 @@ exports.handler = async (event, context) => {
     }
 
     try {
-        console.log('í´µ Auth function started');
+        console.log('ï¿½ï¿½ï¿½ Auth function started');
         
         const { username, password } = JSON.parse(event.body);
         
@@ -44,7 +44,7 @@ exports.handler = async (event, context) => {
 
         // Conectar a la base de datos
         const sql = getDb();
-        console.log('í¿¢ Conectado a Neon DB');
+        console.log('ï¿½ï¿½ï¿½ Conectado a Neon DB');
         
         // Buscar usuario
         const users = await sql`
@@ -54,7 +54,7 @@ exports.handler = async (event, context) => {
         `;
 
         if (users.length === 0) {
-            console.log('í¿¡ Usuario no encontrado:', username);
+            console.log('ï¿½ï¿½ï¿½ Usuario no encontrado:', username);
             return {
                 statusCode: 401,
                 headers,
@@ -69,7 +69,7 @@ exports.handler = async (event, context) => {
         const passwordHash = hashPassword(password);
 
         if (user.password_hash !== passwordHash) {
-            console.log('í¿¡ ContraseÃ±a incorrecta para:', username);
+            console.log('ï¿½ï¿½ï¿½ ContraseÃ±a incorrecta para:', username);
             return {
                 statusCode: 401,
                 headers,
@@ -83,7 +83,7 @@ exports.handler = async (event, context) => {
         // Generar token (en producciÃ³n usa JWT)
         const token = crypto.randomBytes(32).toString('hex');
 
-        console.log('í¿¢ Login exitoso para:', username);
+        console.log('ï¿½ï¿½ï¿½ Login exitoso para:', username);
 
         return {
             statusCode: 200,
@@ -102,7 +102,7 @@ exports.handler = async (event, context) => {
         };
 
     } catch (error) {
-        console.error('í´´ Error en auth:', error);
+        console.error('ï¿½ï¿½ï¿½ Error en auth:', error);
         console.error('Stack:', error.stack);
         
         return {

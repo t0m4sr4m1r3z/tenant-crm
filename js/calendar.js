@@ -165,7 +165,6 @@ function generarEventos(payments, contracts) {
 
     return events;
 }
-
 function inicializarCalendario() {
     const calendarEl = document.getElementById('calendar');
     if (!calendarEl) return;
@@ -177,37 +176,50 @@ function inicializarCalendario() {
 
     // ===== CONFIGURACIÓN CON FORMATO DÍA/MES/AÑO =====
     calendar = new FullCalendar.Calendar(calendarEl, {
+        // ===== IDIOMA ESPAÑOL =====
         locale: 'es',
         initialView: 'dayGridMonth',
+        
+        // ===== BARRA DE HERRAMIENTAS =====
         headerToolbar: {
             left: 'prev,next today',
             center: 'title',
             right: 'dayGridMonth,dayGridWeek,listWeek'
         },
+        
+        // ===== TEXTO DE LOS BOTONES EN ESPAÑOL =====
         buttonText: {
             today: 'Hoy',
             month: 'Mes',
             week: 'Semana',
             list: 'Lista'
         },
+        
         // ===== FORMATO DE FECHAS DÍA/MES/AÑO =====
-        titleFormat: { year: 'numeric', month: 'long' }, // "Enero 2025"
+        titleFormat: { year: 'numeric', month: 'long' }, // "Agosto 2025"
+        
+        // ===== CONFIGURACIÓN POR VISTA =====
         views: {
             dayGridMonth: {
-                titleFormat: { year: 'numeric', month: 'long' }
+                titleFormat: { year: 'numeric', month: 'long' } // "Agosto 2025"
             },
             dayGridWeek: {
-                titleFormat: { year: 'numeric', month: 'long', day: 'numeric' }
+                titleFormat: { year: 'numeric', month: 'long', day: 'numeric' } // "Agosto 2025"
             },
             listWeek: {
-                titleFormat: { year: 'numeric', month: 'long', day: 'numeric' }
+                titleFormat: { year: 'numeric', month: 'long', day: 'numeric' } // "Agosto 2025"
             }
         },
+        
+        // ===== MOSTRAR DÍA SIN FORMATO ADICIONAL =====
         dayCellContent: function(info) {
-            // Mostrar el día sin formato adicional
             return info.date.getDate();
         },
+        
+        // ===== EVENTOS DEL CALENDARIO =====
         events: calendarEvents,
+        
+        // ===== TOOLTIP AL PASAR EL MOUSE =====
         eventDidMount: function(info) {
             const tooltip = document.createElement('div');
             tooltip.className = 'calendar-tooltip absolute bg-gray-900 text-white text-xs rounded-lg p-2 z-50 shadow-lg max-w-xs pointer-events-none hidden';
@@ -267,21 +279,29 @@ function inicializarCalendario() {
                 }
             });
         },
+        
+        // ===== FORMATO DE HORA =====
         eventTimeFormat: {
             hour: '2-digit',
             minute: '2-digit',
             hour12: false
         },
+        
+        // ===== TAMAÑO Y ASPECTO =====
         height: 'auto',
         contentHeight: 'auto',
         aspectRatio: 1.5,
+        
+        // ===== AL INICIAR LA VISTA =====
         viewDidMount: function() {
             aplicarModoOscuroCalendario();
         }
     });
 
+    // ===== RENDERIZAR CALENDARIO =====
     calendar.render();
 
+    // ===== OBSERVADOR PARA MODO OSCURO =====
     const observer = new MutationObserver(() => {
         aplicarModoOscuroCalendario();
     });
@@ -290,9 +310,8 @@ function inicializarCalendario() {
         attributeFilter: ['class']
     });
 
-    console.log('✅ Calendario inicializado con formato día/mes/año');
+    console.log('✅ Calendario inicializado correctamente en español con formato día/mes/año');
 }
-
 function aplicarModoOscuroCalendario() {
     const isDark = document.body.classList.contains('dark');
     const calendarEl = document.getElementById('calendar');

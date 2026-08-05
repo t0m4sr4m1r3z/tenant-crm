@@ -24,17 +24,18 @@
         });
     }
 
-    // --- Formatea una fecha a formato local (ej: 15/03/2026) ---
-    function formatDate(dateStr) {
-        if (!dateStr) return '-';
-        const date = new Date(dateStr);
-        if (isNaN(date.getTime())) return '-';
-        return date.toLocaleDateString('es-ES', {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit'
-        });
-    }
+  // utils.js - Modificar la función formatDate
+function formatDate(dateStr) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '-';
+    
+    // ===== FORMATO DÍA/MES/AÑO =====
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+}
 
     // --- Debounce para búsquedas y eventos frecuentes ---
     function debounce(func, wait) {
