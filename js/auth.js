@@ -1,14 +1,12 @@
-// Authentication module (con roles) – VERSIÓN CON SUPER ADMIN
+// Authentication module (con roles) – VERSIÓN CORREGIDA
 const AUTH = {
-    // Roles definidos
     ROLES: {
         ADMIN: 'admin',
         AGENT: 'agent',
         VIEWER: 'viewer',
-        SUPER_ADMIN: 'super_admin'  // NUEVO
+        SUPER_ADMIN: 'super_admin'
     },
 
-    // Permisos por rol
     PERMISSIONS: {
         admin: {
             canCreate: true,
@@ -34,7 +32,6 @@ const AUTH = {
             canAccessReports: false,
             canManageUsers: false
         },
-        // ===== NUEVO: SUPER ADMIN =====
         super_admin: {
             canCreate: true,
             canEdit: true,
@@ -47,14 +44,13 @@ const AUTH = {
         }
     },
 
-    // Check if user is logged in
     checkAuth: function() {
-        // Usamos sessionStorage para mayor seguridad
         const token = sessionStorage.getItem('authToken');
         const user = sessionStorage.getItem('user');
         
-        // Skip auth check on login page
-        if (window.location.pathname.includes('login.html')) {
+        // Saltar verificación en páginas de login/registro
+        if (window.location.pathname.includes('login.html') || 
+            window.location.pathname.includes('register.html')) {
             return;
         }
         
@@ -64,8 +60,10 @@ const AUTH = {
         }
         
         const userData = JSON.parse(user);
-        // Verificar acceso a la página actual según el rol
+        
+        // Verificar acceso a la página actual
         if (!this.hasPageAccess(userData.role, window.location.pathname)) {
+            console.warn(`⚠️ Acceso denegado a ${window.location.pathname} para rol ${userData.role}`);
             window.location.href = '/dashboard.html';
             return false;
         }
@@ -73,60 +71,54 @@ const AUTH = {
         return { token, user: userData };
     },
 
-    // Verificar si el rol tiene acceso a una página
     hasPageAccess: function(role, path) {
         const page = path.substring(path.lastIndexOf('/') + 1);
         const allowedPages = {
-            admin: ['dashboard.html', 'tenants.html', 'owners.html', 'properties.html', 'contracts.html', 'payments.html', 'calendar.html', 'reports.html', 'settings.html'],
-            agent: ['dashboard.html', 'tenants.html', 'owners.html', 'properties.html', 'contracts.html', 'payments.html', 'calendar.html'],
-            viewer: ['dashboard.html', 'tenants.html', 'owners.html', 'properties.html', 'contracts.html', 'payments.html', 'calendar.html'],
-            // ===== NUEVO: SUPER ADMIN puede acceder a todo, incluyendo /admin/ =====
-            super_admin: ['dashboard.html', 'tenants.html', 'owners.html', 'properties.html', 'contracts.html', 'payments.html', 'calendar.html', 'reports.html', 'settings.html', 'admin/dashboard.html', 'admin/requests.html', 'admin/companies.html']
+            // ===== ADMIN (cliente) - ACCESO COMPLETO =====
+            admin: [
+                'dashboard.html', 'tenants.html', 'owners.html', 
+                'properties.html', 'contracts.html', 'payments.html', 
+                'calendar.html', 'reports.html', 'settings.html'
+            ],
+            // ===== AGENTE =====
+            agent: [
+                'dashboard.html', 'tenants.html', 'owners.html', 
+                'properties.html', 'contracts.html', 'payments.html', 
+                'calendar.html'
+            ],
+            // ===== VISUALIZADOR =====
+            viewer: [
+                'dashboard.html', 'tenants.html', 'owners.html', 
+                'properties.html', 'contracts.html', 'payments.html', 
+                'calendar.html'
+            ],
+            // ===== SUPER ADMIN =====
+            super_admin: [
+                'dashboard.html', 'tenants.html', 'owners.html', 
+                'properties.html', 'contracts.html', 'payments.html', 
+                'calendar.html', 'reports.html', 'settings.html',
+                'admin/dashboard.html', 'admin/requests.html', 'admin/companies.html'
+            ]
         };
         const allowed = allowedPages[role] || [];
         return allowed.includes(page);
     },
 
-    // Login function (ahora con roles y SUPER ADMIN)
     login: async function(username, password) {
         return new Promise((resolve, reject) => {
             setTimeout(() => {
                 let user = null;
                 let token = null;
 
-                // ===== SUPER ADMIN (NUEVO) =====
                 if (username === 'superadmin' && password === 'SuperAdmin213?!') {
-                    user = { 
-                        username: 'superadmin', 
-                        name: 'Super Administrador',
-                        role: this.ROLES.SUPER_ADMIN
-                    };
-                } 
-                // ===== ADMIN EXISTENTE =====
-                else if (username === 'admin' && password === 'admin123') {
-                    user = { 
-                        username: 'admin', 
-                        name: 'Administrador',
-                        role: this.ROLES.ADMIN
-                    };
-                } 
-                // ===== AGENTE =====
-                else if (username === 'agente' && password === 'agente123') {
-                    user = { 
-                        username: 'agente', 
-                        name: 'Agente de Gestión',
-                        role: this.ROLES.AGENT
-                    };
-                } 
-                // ===== VISUALIZADOR =====
-                else if (username === 'visualizador' && password === 'visualizador123') {
-                    user = { 
-                        username: 'visualizador', 
-                        name: 'Visualizador',
-                        role: this.ROLES.VIEWER
-                    };
-                } 
-                else {
+                    user = { username: 'superadmin', name: 'Super Administrador', role: this.ROLES.SUPER_ADMIN };
+                } else if (username === 'admin' && password === 'admin123') {
+                    user = { username: 'admin', name: 'Administrador', role: this.ROLES.ADMIN };
+                } else if (username === 'agente' && password === 'agente123') {
+                    user = { username: 'agente', name: 'Agente de Gestión', role: this.ROLES.AGENT };
+                } else if (username === 'visualizador' && password === 'visualizador123') {
+                    user = { username: 'visualizador', name: 'Visualizador', role: this.ROLES.VIEWER };
+                } else {
                     reject({ success: false, message: 'Usuario o contraseña incorrectos' });
                     return;
                 }
@@ -139,54 +131,45 @@ const AUTH = {
         });
     },
     
-    // Logout function
     logout: function() {
         sessionStorage.removeItem('authToken');
         sessionStorage.removeItem('user');
         window.location.href = '/login.html';
     },
     
-    // Get current user
     getCurrentUser: function() {
         const user = sessionStorage.getItem('user');
         return user ? JSON.parse(user) : null;
     },
 
-    // Get current role
     getCurrentRole: function() {
         const user = this.getCurrentUser();
         return user ? user.role : null;
     },
 
-    // Check if user has a specific permission
     hasPermission: function(permission) {
         const role = this.getCurrentRole();
         if (!role) return false;
         return this.PERMISSIONS[role]?.[permission] || false;
     },
 
-    // Check if user has a specific role
     hasRole: function(role) {
         const currentRole = this.getCurrentRole();
         return currentRole === role;
     },
 
-    // Check if user is admin
     isAdmin: function() {
         return this.hasRole(this.ROLES.ADMIN);
     },
 
-    // Check if user is super admin
     isSuperAdmin: function() {
         return this.hasRole(this.ROLES.SUPER_ADMIN);
     },
 
-    // Aplicar restricciones de visibilidad en la página actual
     aplicarRestriccionesPorRol: function() {
         const user = this.getCurrentUser();
         if (!user) return;
 
-        // Ocultar elementos del sidebar según rol
         document.querySelectorAll('[data-required-role]').forEach(el => {
             const requiredRole = el.dataset.requiredRole;
             if (!this.hasRole(requiredRole)) {
@@ -194,7 +177,6 @@ const AUTH = {
             }
         });
 
-        // Ocultar botones de acción según permisos
         if (!this.hasPermission('canCreate')) {
             document.querySelectorAll('[data-action="create"]').forEach(el => el.style.display = 'none');
         }
@@ -207,11 +189,15 @@ const AUTH = {
     }
 };
 
-// Inicializar auth check y restricciones al cargar la página
+// ============================================
+// INICIALIZACIÓN
+// ============================================
+
 document.addEventListener('DOMContentLoaded', () => {
+    // Verificar autenticación
     const auth = AUTH.checkAuth();
     
-    // Setup logout button if exists
+    // Logout
     const logoutBtn = document.getElementById('logoutBtn');
     if (logoutBtn) {
         logoutBtn.addEventListener('click', (e) => {
@@ -220,7 +206,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // Setup login form if exists
+    // Login
     const loginForm = document.getElementById('loginForm');
     if (loginForm) {
         loginForm.addEventListener('submit', async (e) => {
@@ -264,18 +250,21 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Aplicar restricciones de rol en todas las páginas excepto login
-    if (!window.location.pathname.includes('login.html')) {
+    // Aplicar restricciones de rol en todas las páginas excepto login/register
+    if (!window.location.pathname.includes('login.html') && 
+        !window.location.pathname.includes('register.html')) {
         setTimeout(() => {
             AUTH.aplicarRestriccionesPorRol();
         }, 100);
     }
 });
 
-// Export for use in other files
 window.AUTH = AUTH;
 
-// PWA Registration (código existente)
+// ============================================
+// PWA
+// ============================================
+
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js')
@@ -317,7 +306,7 @@ if ('serviceWorker' in navigator) {
     });
 }
 
-// Instalación PWA (código existente)
+// Instalación PWA
 let deferredPrompt;
 window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
@@ -326,21 +315,24 @@ window.addEventListener('beforeinstallprompt', (e) => {
 });
 
 function showInstallButton() {
-    const installBtn = document.createElement('button');
-    installBtn.id = 'installPwaBtn';
-    installBtn.className = 'fixed bottom-4 left-4 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg hover:bg-blue-700 transition flex items-center gap-2 z-50';
-    installBtn.innerHTML = '<i class="fas fa-download"></i> Instalar App';
-    installBtn.addEventListener('click', async () => {
+    const installBtn = document.getElementById('installPwaBtn');
+    if (installBtn) return; // Ya existe
+    
+    const btn = document.createElement('button');
+    btn.id = 'installPwaBtn';
+    btn.className = 'fixed bottom-4 left-4 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg hover:bg-blue-700 transition flex items-center gap-2 z-50';
+    btn.innerHTML = '<i class="fas fa-download"></i> Instalar App';
+    btn.addEventListener('click', async () => {
         if (!deferredPrompt) return;
         deferredPrompt.prompt();
         const { outcome } = await deferredPrompt.userChoice;
         if (outcome === 'accepted') {
             console.log('✅ Usuario aceptó instalar la PWA');
-            installBtn.remove();
+            btn.remove();
         }
         deferredPrompt = null;
     });
-    document.body.appendChild(installBtn);
+    document.body.appendChild(btn);
 }
 
 window.addEventListener('appinstalled', () => {
