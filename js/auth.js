@@ -1,10 +1,11 @@
-// Authentication module (con roles) – VERSIÓN CORREGIDA
+// Authentication module (con roles) – VERSIÓN CON SUPER ADMIN
 const AUTH = {
     // Roles definidos
     ROLES: {
         ADMIN: 'admin',
         AGENT: 'agent',
-        VIEWER: 'viewer'
+        VIEWER: 'viewer',
+        SUPER_ADMIN: 'super_admin'  // NUEVO
     },
 
     // Permisos por rol
@@ -32,6 +33,17 @@ const AUTH = {
             canAccessSettings: false,
             canAccessReports: false,
             canManageUsers: false
+        },
+        // ===== NUEVO: SUPER ADMIN =====
+        super_admin: {
+            canCreate: true,
+            canEdit: true,
+            canDelete: true,
+            canAccessSettings: true,
+            canAccessReports: true,
+            canManageUsers: true,
+            canManageCompanies: true,
+            canManageRequests: true
         }
     },
 
@@ -67,39 +79,54 @@ const AUTH = {
         const allowedPages = {
             admin: ['dashboard.html', 'tenants.html', 'owners.html', 'properties.html', 'contracts.html', 'payments.html', 'calendar.html', 'reports.html', 'settings.html'],
             agent: ['dashboard.html', 'tenants.html', 'owners.html', 'properties.html', 'contracts.html', 'payments.html', 'calendar.html'],
-            viewer: ['dashboard.html', 'tenants.html', 'owners.html', 'properties.html', 'contracts.html', 'payments.html', 'calendar.html']
+            viewer: ['dashboard.html', 'tenants.html', 'owners.html', 'properties.html', 'contracts.html', 'payments.html', 'calendar.html'],
+            // ===== NUEVO: SUPER ADMIN puede acceder a todo, incluyendo /admin/ =====
+            super_admin: ['dashboard.html', 'tenants.html', 'owners.html', 'properties.html', 'contracts.html', 'payments.html', 'calendar.html', 'reports.html', 'settings.html', 'admin/dashboard.html', 'admin/requests.html', 'admin/companies.html']
         };
         const allowed = allowedPages[role] || [];
         return allowed.includes(page);
     },
 
-    // Login function (ahora con roles)
+    // Login function (ahora con roles y SUPER ADMIN)
     login: async function(username, password) {
         return new Promise((resolve, reject) => {
             setTimeout(() => {
                 let user = null;
                 let token = null;
 
-                // Mapeo de usuarios a roles
-                if (username === 'admin' && password === 'admin123') {
+                // ===== SUPER ADMIN (NUEVO) =====
+                if (username === 'superadmin' && password === 'SuperAdmin213?!') {
+                    user = { 
+                        username: 'superadmin', 
+                        name: 'Super Administrador',
+                        role: this.ROLES.SUPER_ADMIN
+                    };
+                } 
+                // ===== ADMIN EXISTENTE =====
+                else if (username === 'admin' && password === 'admin123') {
                     user = { 
                         username: 'admin', 
                         name: 'Administrador',
                         role: this.ROLES.ADMIN
                     };
-                } else if (username === 'agente' && password === 'agente123') {
+                } 
+                // ===== AGENTE =====
+                else if (username === 'agente' && password === 'agente123') {
                     user = { 
                         username: 'agente', 
                         name: 'Agente de Gestión',
                         role: this.ROLES.AGENT
                     };
-                } else if (username === 'visualizador' && password === 'visualizador123') {
+                } 
+                // ===== VISUALIZADOR =====
+                else if (username === 'visualizador' && password === 'visualizador123') {
                     user = { 
                         username: 'visualizador', 
                         name: 'Visualizador',
                         role: this.ROLES.VIEWER
                     };
-                } else {
+                } 
+                else {
                     reject({ success: false, message: 'Usuario o contraseña incorrectos' });
                     return;
                 }
@@ -147,6 +174,11 @@ const AUTH = {
     // Check if user is admin
     isAdmin: function() {
         return this.hasRole(this.ROLES.ADMIN);
+    },
+
+    // Check if user is super admin
+    isSuperAdmin: function() {
+        return this.hasRole(this.ROLES.SUPER_ADMIN);
     },
 
     // Aplicar restricciones de visibilidad en la página actual
