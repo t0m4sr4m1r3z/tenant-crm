@@ -12,5 +12,13 @@
     "dotenv": "^17.3.1",
     "node-fetch": "^3.3.2",
     "resend": "^3.0.0"
-  }
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.5.4",
+    "postcss": "^8.5.25",
+    "tailwindcss": "^4.3.3"
+  },
+  "scripts": {
+    "build": "tailwindcss -i ./css/input.css -o ./css/output.css --minify"
+}
 }

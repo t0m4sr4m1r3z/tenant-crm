@@ -38,12 +38,13 @@ const API = {
         return this.request('/payments');
     },
 
-    // Si el endpoint no existe, devolvemos array vacío
+    // ✅ CORREGIDO - getProperties dentro del objeto API
     async getProperties() {
         try {
-            return await this.request('/properties');
+            const result = await this.request('/properties');
+            return result || [];
         } catch (e) {
-            console.warn('getProperties fallback:', e);
+            console.warn('⚠️ Error cargando propiedades, usando array vacío:', e);
             return [];
         }
     }
@@ -156,17 +157,20 @@ function processDashboardData(tenants, contracts, payments, properties) {
     const currentYear = today.getFullYear();
     
     // ===== INQUILINOS =====
-    document.getElementById('totalTenants').textContent = tenants.length;
+    const totalTenantsEl = document.getElementById('totalTenants');
+    if (totalTenantsEl) totalTenantsEl.textContent = tenants.length;
     
     const activeContracts = contracts.filter(c => c && c.status === 'active');
-    document.getElementById('activeContracts').textContent = activeContracts.length;
+    const activeContractsEl = document.getElementById('activeContracts');
+    if (activeContractsEl) activeContractsEl.textContent = activeContracts.length;
     
     const newTenantsThisMonth = tenants.filter(t => {
         if (!t || !t.created_at) return false;
         const created = new Date(t.created_at);
         return created.getMonth() === currentMonth && created.getFullYear() === currentYear;
     }).length;
-    document.getElementById('newTenantsThisMonth').textContent = `+${newTenantsThisMonth}`;
+    const newTenantsEl = document.getElementById('newTenantsThisMonth');
+    if (newTenantsEl) newTenantsEl.textContent = `+${newTenantsThisMonth}`;
     
     const expiringSoon = activeContracts.filter(c => {
         if (!c || !c.end_date) return false;
@@ -174,12 +178,18 @@ function processDashboardData(tenants, contracts, payments, properties) {
         const diffDays = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
         return diffDays > 0 && diffDays <= 30;
     }).length;
-    document.getElementById('expiringSoon').textContent = expiringSoon;
+    const expiringEl = document.getElementById('expiringSoon');
+    if (expiringEl) expiringEl.textContent = expiringSoon;
     
-    // ===== PROPIEDADES =====
-    document.getElementById('totalProperties').textContent = properties.length;
-    const available = properties.filter(p => p && p.status === 'disponible').length;
-    document.getElementById('availableProperties').textContent = available;
+    // ===== PROPIEDADES (con verificación de existencia) =====
+    const totalPropsEl = document.getElementById('totalProperties');
+    if (totalPropsEl) totalPropsEl.textContent = properties.length;
+    
+    const availableEl = document.getElementById('availableProperties');
+    if (availableEl) {
+        const available = properties.filter(p => p && p.status === 'disponible').length;
+        availableEl.textContent = available;
+    }
     
     // ===== AUMENTOS =====
     const upcomingIncreases = contracts.filter(c => {
@@ -188,13 +198,17 @@ function processDashboardData(tenants, contracts, payments, properties) {
         const diffDays = Math.ceil((nextDate - today) / (1000 * 60 * 60 * 24));
         return diffDays > 0 && diffDays <= 60;
     });
-    document.getElementById('upcomingIncreases').textContent = upcomingIncreases.length;
+    const upcomingEl = document.getElementById('upcomingIncreases');
+    if (upcomingEl) upcomingEl.textContent = upcomingIncreases.length;
     
-    if (upcomingIncreases.length > 0 && upcomingIncreases[0].next_increase_date) {
-        const nextDate = new Date(upcomingIncreases[0].next_increase_date);
-        document.getElementById('nextIncreaseDate').textContent = nextDate.toLocaleDateString();
-    } else {
-        document.getElementById('nextIncreaseDate').textContent = '-';
+    const nextDateEl = document.getElementById('nextIncreaseDate');
+    if (nextDateEl) {
+        if (upcomingIncreases.length > 0 && upcomingIncreases[0].next_increase_date) {
+            const nextDate = new Date(upcomingIncreases[0].next_increase_date);
+            nextDateEl.textContent = nextDate.toLocaleDateString();
+        } else {
+            nextDateEl.textContent = '-';
+        }
     }
     
     // ===== INGRESOS =====
@@ -711,13 +725,19 @@ function actualizarRecordatorios() {
 
         reminderData = { overduePayments, expiringContracts, upcomingIncreases };
 
-        document.getElementById('reminderOverduePayments').textContent = overduePayments;
-        document.getElementById('reminderExpiringContracts').textContent = expiringContracts;
-        document.getElementById('reminderUpcomingIncreases').textContent = upcomingIncreases;
+        const overdueEl = document.getElementById('reminderOverduePayments');
+        if (overdueEl) overdueEl.textContent = overduePayments;
+        
+        const expiringEl = document.getElementById('reminderExpiringContracts');
+        if (expiringEl) expiringEl.textContent = expiringContracts;
+        
+        const upcomingEl = document.getElementById('reminderUpcomingIncreases');
+        if (upcomingEl) upcomingEl.textContent = upcomingIncreases;
 
         if (lastReminderSent) {
             const date = new Date(lastReminderSent);
-            document.getElementById('lastReminderDate').textContent = `Último envío: ${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+            const lastEl = document.getElementById('lastReminderDate');
+            if (lastEl) lastEl.textContent = `Último envío: ${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
         }
 
     }).catch(error => {
@@ -797,8 +817,10 @@ function generarResumenRecordatorios() {
 
 function enviarRecordatoriosEmail() {
     const statusDiv = document.getElementById('reminderStatus');
-    statusDiv.textContent = '⏳ Generando resumen...';
-    statusDiv.classList.remove('hidden');
+    if (statusDiv) {
+        statusDiv.textContent = '⏳ Generando resumen...';
+        statusDiv.classList.remove('hidden');
+    }
 
     generarResumenRecordatorios().then(body => {
         const subject = `📋 Resumen de recordatorios - ${new Date().toLocaleDateString('es-ES')}`;
@@ -815,17 +837,20 @@ function enviarRecordatoriosEmail() {
         }
 
         window.open(mailtoLink, '_blank');
-        statusDiv.textContent = '✅ Recordatorios enviados (abriendo correo)';
-        statusDiv.classList.remove('hidden');
-        statusDiv.style.color = '#10b981';
+        if (statusDiv) {
+            statusDiv.textContent = '✅ Recordatorios enviados (abriendo correo)';
+            statusDiv.classList.remove('hidden');
+            statusDiv.style.color = '#10b981';
+        }
 
         const now = new Date().toISOString();
         localStorage.setItem('lastReminderSent', now);
         lastReminderSent = now;
-        document.getElementById('lastReminderDate').textContent = `Último envío: ${new Date(now).toLocaleDateString()} ${new Date(now).toLocaleTimeString()}`;
+        const lastEl = document.getElementById('lastReminderDate');
+        if (lastEl) lastEl.textContent = `Último envío: ${new Date(now).toLocaleDateString()} ${new Date(now).toLocaleTimeString()}`;
 
         setTimeout(() => {
-            statusDiv.classList.add('hidden');
+            if (statusDiv) statusDiv.classList.add('hidden');
         }, 5000);
     });
 }
@@ -835,8 +860,10 @@ document.addEventListener('DOMContentLoaded', function() {
     setTimeout(() => {
         if (document.getElementById('reminderOverduePayments')) {
             actualizarRecordatorios();
-            document.getElementById('sendRemindersBtn').addEventListener('click', enviarRecordatoriosEmail);
-            document.getElementById('refreshRemindersBtn').addEventListener('click', actualizarRecordatorios);
+            const sendBtn = document.getElementById('sendRemindersBtn');
+            if (sendBtn) sendBtn.addEventListener('click', enviarRecordatoriosEmail);
+            const refreshBtn = document.getElementById('refreshRemindersBtn');
+            if (refreshBtn) refreshBtn.addEventListener('click', actualizarRecordatorios);
         }
     }, 1000);
 });
