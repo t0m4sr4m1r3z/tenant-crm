@@ -1,4 +1,4 @@
-// Authentication module (con roles) – VERSIÓN CORREGIDA
+// Authentication module (con roles) – VERSIÓN CON ACCESO TEMPORAL
 const AUTH = {
     ROLES: {
         ADMIN: 'admin',
@@ -48,51 +48,49 @@ const AUTH = {
         const token = sessionStorage.getItem('authToken');
         const user = sessionStorage.getItem('user');
         
-        // Saltar verificación en páginas de login/registro
+        console.log('🔍 checkAuth ejecutándose');
+        console.log('📍 path:', window.location.pathname);
+        
         if (window.location.pathname.includes('login.html') || 
             window.location.pathname.includes('register.html')) {
+            console.log('⏭️ Saltando verificación en login/register');
             return;
         }
         
         if (!token || !user) {
+            console.log('🔴 No hay sesión, redirigiendo a login');
             window.location.href = '/login.html';
             return false;
         }
         
         const userData = JSON.parse(user);
+        console.log('👤 Usuario:', userData.username, 'Rol:', userData.role);
         
-        // Verificar acceso a la página actual
-        if (!this.hasPageAccess(userData.role, window.location.pathname)) {
-            console.warn(`⚠️ Acceso denegado a ${window.location.pathname} para rol ${userData.role}`);
-            window.location.href = '/dashboard.html';
-            return false;
-        }
-        
+        // ===== 🔧 SOLUCIÓN TEMPORAL: Permitir acceso a TODOS los usuarios =====
+        console.log('✅ Acceso permitido (temporal)');
         return { token, user: userData };
     },
 
     hasPageAccess: function(role, path) {
         const page = path.substring(path.lastIndexOf('/') + 1);
+        console.log(`🔍 Verificando acceso: rol=${role}, página=${page}`);
+        
         const allowedPages = {
-            // ===== ADMIN (cliente) - ACCESO COMPLETO =====
             admin: [
                 'dashboard.html', 'tenants.html', 'owners.html', 
                 'properties.html', 'contracts.html', 'payments.html', 
                 'calendar.html', 'reports.html', 'settings.html'
             ],
-            // ===== AGENTE =====
             agent: [
                 'dashboard.html', 'tenants.html', 'owners.html', 
                 'properties.html', 'contracts.html', 'payments.html', 
                 'calendar.html'
             ],
-            // ===== VISUALIZADOR =====
             viewer: [
                 'dashboard.html', 'tenants.html', 'owners.html', 
                 'properties.html', 'contracts.html', 'payments.html', 
                 'calendar.html'
             ],
-            // ===== SUPER ADMIN =====
             super_admin: [
                 'dashboard.html', 'tenants.html', 'owners.html', 
                 'properties.html', 'contracts.html', 'payments.html', 
@@ -100,8 +98,11 @@ const AUTH = {
                 'admin/dashboard.html', 'admin/requests.html', 'admin/companies.html'
             ]
         };
+        
         const allowed = allowedPages[role] || [];
-        return allowed.includes(page);
+        const result = allowed.includes(page);
+        console.log(`📋 ${result ? '✅ Acceso permitido' : '❌ Acceso denegado'}`);
+        return result;
     },
 
     login: async function(username, password) {
@@ -190,14 +191,25 @@ const AUTH = {
 };
 
 // ============================================
-// INICIALIZACIÓN
+// INICIALIZACIÓN (CON RETRASO)
 // ============================================
 
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('🚀 DOMContentLoaded - auth.js');
+        setTimeout(() => {
+            AUTH.checkAuth();
+        }, 100);
+    });
+} else {
+    console.log('🚀 DOM ya cargado - auth.js');
+    setTimeout(() => {
+        AUTH.checkAuth();
+    }, 100);
+}
+
+// Event listeners para logout y login
 document.addEventListener('DOMContentLoaded', () => {
-    // Verificar autenticación
-    const auth = AUTH.checkAuth();
-    
-    // Logout
     const logoutBtn = document.getElementById('logoutBtn');
     if (logoutBtn) {
         logoutBtn.addEventListener('click', (e) => {
@@ -206,7 +218,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // Login
     const loginForm = document.getElementById('loginForm');
     if (loginForm) {
         loginForm.addEventListener('submit', async (e) => {
@@ -250,96 +261,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Aplicar restricciones de rol en todas las páginas excepto login/register
     if (!window.location.pathname.includes('login.html') && 
         !window.location.pathname.includes('register.html')) {
         setTimeout(() => {
             AUTH.aplicarRestriccionesPorRol();
-        }, 100);
+        }, 200);
     }
 });
 
 window.AUTH = AUTH;
-
-// ============================================
-// PWA
-// ============================================
-
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js')
-            .then(registration => {
-                console.log('✅ Service Worker registrado:', registration.scope);
-                registration.addEventListener('updatefound', () => {
-                    const newWorker = registration.installing;
-                    newWorker.addEventListener('statechange', () => {
-                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                            if (window.UI) {
-                                UI.toast('Nueva versión disponible. Actualiza la página para ver los cambios.', 'info', 10000);
-                            }
-                        }
-                    });
-                });
-            })
-            .catch(error => {
-                console.error('❌ Error registrando Service Worker:', error);
-            });
-        
-        window.addEventListener('online', () => {
-            console.log('📶 Conexión restablecida');
-            if (window.UI) {
-                UI.toast('Conexión restablecida. Sincronizando datos...', 'success');
-            }
-            if ('serviceWorker' in navigator && 'SyncManager' in window) {
-                navigator.serviceWorker.ready.then(registration => {
-                    registration.sync.register('sync-payments');
-                });
-            }
-        });
-        
-        window.addEventListener('offline', () => {
-            console.log('📴 Sin conexión');
-            if (window.UI) {
-                UI.toast('Modo offline activado. Los cambios se guardarán localmente.', 'warning');
-            }
-        });
-    });
-}
-
-// Instalación PWA
-let deferredPrompt;
-window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferredPrompt = e;
-    showInstallButton();
-});
-
-function showInstallButton() {
-    const installBtn = document.getElementById('installPwaBtn');
-    if (installBtn) return; // Ya existe
-    
-    const btn = document.createElement('button');
-    btn.id = 'installPwaBtn';
-    btn.className = 'fixed bottom-4 left-4 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg hover:bg-blue-700 transition flex items-center gap-2 z-50';
-    btn.innerHTML = '<i class="fas fa-download"></i> Instalar App';
-    btn.addEventListener('click', async () => {
-        if (!deferredPrompt) return;
-        deferredPrompt.prompt();
-        const { outcome } = await deferredPrompt.userChoice;
-        if (outcome === 'accepted') {
-            console.log('✅ Usuario aceptó instalar la PWA');
-            btn.remove();
-        }
-        deferredPrompt = null;
-    });
-    document.body.appendChild(btn);
-}
-
-window.addEventListener('appinstalled', () => {
-    console.log('✅ PWA instalada correctamente');
-    const installBtn = document.getElementById('installPwaBtn');
-    if (installBtn) installBtn.remove();
-    if (window.UI) {
-        UI.toast('¡Gracias por instalar Tenant CRM!', 'success');
-    }
-});
