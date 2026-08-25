@@ -1,4 +1,4 @@
-// properties.js - Gestión de Propiedades (VERSIÓN CON API REAL)
+// properties.js - Gestión de Propiedades (VERSIÓN CORREGIDA)
 const API = {
     baseUrl: '/.netlify/functions',
 
