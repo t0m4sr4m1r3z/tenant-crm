@@ -1,7 +1,6 @@
-// netlify/functions/properties.js - CRUD de propiedades
+// netlify/functions/properties.js - CRUD completo de propiedades
 const { neon } = require('@neondatabase/serverless');
 
-// Headers CORS
 const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
@@ -9,15 +8,7 @@ const headers = {
     'Content-Type': 'application/json'
 };
 
-// Función para obtener el company_id del usuario
-async function getCompanyId(sql, token) {
-    // Por ahora, si es admin, devolvemos null (sin filtro)
-    // En producción, se obtendría de la sesión del usuario
-    return null;
-}
-
 exports.handler = async (event) => {
-    // Manejar preflight (OPTIONS)
     if (event.httpMethod === 'OPTIONS') {
         return { statusCode: 204, headers };
     }
@@ -26,9 +17,6 @@ exports.handler = async (event) => {
         const sql = neon(process.env.DATABASE_URL);
         const method = event.httpMethod;
         const queryParams = event.queryStringParameters || {};
-        
-        // Obtener company_id (por ahora null para admin)
-        const companyId = null; // await getCompanyId(sql, event.headers.authorization);
 
         // ===== GET =====
         if (method === 'GET') {
@@ -40,7 +28,6 @@ exports.handler = async (event) => {
                     FROM properties p
                     LEFT JOIN owners o ON p.owner_id = o.id
                     WHERE p.id = ${id}
-                    ${companyId ? sql`AND p.company_id = ${companyId}` : sql``}
                 `;
                 return {
                     statusCode: 200,
@@ -57,7 +44,6 @@ exports.handler = async (event) => {
                     FROM properties p
                     LEFT JOIN owners o ON p.owner_id = o.id
                     WHERE p.owner_id = ${ownerId}
-                    ${companyId ? sql`AND p.company_id = ${companyId}` : sql``}
                     ORDER BY p.id DESC
                 `;
                 return {
@@ -72,7 +58,6 @@ exports.handler = async (event) => {
                 SELECT p.*, o.name as owner_name 
                 FROM properties p
                 LEFT JOIN owners o ON p.owner_id = o.id
-                ${companyId ? sql`WHERE p.company_id = ${companyId}` : sql``}
                 ORDER BY p.id DESC
             `;
             return {
@@ -86,7 +71,6 @@ exports.handler = async (event) => {
         if (method === 'POST') {
             const data = JSON.parse(event.body);
             
-            // Validar campos obligatorios
             if (!data.address || !data.owner_id || !data.type) {
                 return {
                     statusCode: 400,
@@ -100,8 +84,7 @@ exports.handler = async (event) => {
             const result = await sql`
                 INSERT INTO properties (
                     address, owner_id, type, rooms, bathrooms, 
-                    covered_area, uncovered_area, status, description,
-                    company_id
+                    covered_area, uncovered_area, status, description
                 ) VALUES (
                     ${data.address}, 
                     ${data.owner_id}, 
@@ -111,8 +94,7 @@ exports.handler = async (event) => {
                     ${data.covered_area || null}, 
                     ${data.uncovered_area || null}, 
                     ${data.status || 'disponible'}, 
-                    ${data.description || ''},
-                    ${companyId}
+                    ${data.description || ''}
                 )
                 RETURNING *
             `;
@@ -149,7 +131,6 @@ exports.handler = async (event) => {
                     description = ${data.description || ''},
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ${data.id}
-                ${companyId ? sql`AND company_id = ${companyId}` : sql``}
                 RETURNING *
             `;
             
@@ -183,7 +164,6 @@ exports.handler = async (event) => {
             const result = await sql`
                 DELETE FROM properties 
                 WHERE id = ${id}
-                ${companyId ? sql`AND company_id = ${companyId}` : sql``}
                 RETURNING id
             `;
             
@@ -205,7 +185,6 @@ exports.handler = async (event) => {
             };
         }
 
-        // Método no permitido
         return {
             statusCode: 405,
             headers,
