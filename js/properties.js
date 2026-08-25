@@ -1,4 +1,4 @@
-// properties.js - Gestión de Propiedades (Versión con fallback) – CORREGIDO
+// properties.js - Gestión de Propiedades (VERSIÓN CON API REAL)
 const API = {
     baseUrl: '/.netlify/functions',
 
@@ -90,14 +90,6 @@ const PAGE_SIZE = 10;
 let filteredProperties = [];
 let searchTimeout = null;
 
-// ===== DATOS DE EJEMPLO (FALLBACK) =====
-// Estos datos se usarán si el endpoint /properties no existe
-const SAMPLE_PROPERTIES = [
-    { id: 1, address: 'Calle Falsa 123, Buenos Aires', type: 'casa', owner_id: 1, owner_name: 'Juan Pérez', rooms: 3, bathrooms: 2, covered_area: 120, uncovered_area: 40, status: 'disponible', description: 'Hermosa casa en zona residencial' },
-    { id: 2, address: 'Av. Siempre Viva 742, CABA', type: 'departamento', owner_id: 2, owner_name: 'María Gómez', rooms: 2, bathrooms: 1, covered_area: 80, uncovered_area: 0, status: 'alquilado', description: 'Departamento céntrico' },
-    { id: 3, address: 'Ruta 8 Km 12, Moreno', type: 'terreno', owner_id: 1, owner_name: 'Juan Pérez', rooms: 0, bathrooms: 0, covered_area: 0, uncovered_area: 500, status: 'disponible', description: 'Terreno en desarrollo' }
-];
-
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('🏢 Página de propiedades cargada');
 
@@ -184,11 +176,6 @@ async function loadOwners() {
     } catch (error) {
         console.error('Error cargando propietarios:', error);
         currentOwners = [];
-        // Usar datos de ejemplo para propietarios si es necesario
-        currentOwners = [
-            { id: 1, name: 'Juan Pérez' },
-            { id: 2, name: 'María Gómez' }
-        ];
         populateOwnerSelect();
     }
 }
@@ -212,17 +199,8 @@ async function loadProperties() {
 
     try {
         UI.showLoading('propertiesTableBody', 'Cargando propiedades...');
-        let properties = [];
         
-        try {
-            properties = await API.getProperties();
-        } catch (error) {
-            console.warn('⚠️ Error cargando propiedades desde API, usando datos de ejemplo:', error);
-            // Usar datos de ejemplo
-            properties = SAMPLE_PROPERTIES;
-            UI.toast('Usando datos de ejemplo para propiedades', 'info', 3000);
-        }
-        
+        const properties = await API.getProperties();
         currentProperties = properties || [];
         filteredProperties = [...currentProperties];
         currentPage = 1;
@@ -230,9 +208,19 @@ async function loadProperties() {
     } catch (error) {
         console.error('Error cargando propiedades:', error);
         UI.toast('Error al cargar las propiedades: ' + error.message, 'error');
-        currentProperties = SAMPLE_PROPERTIES;
-        filteredProperties = [...currentProperties];
-        renderizarPropiedadesPaginado();
+        currentProperties = [];
+        filteredProperties = [];
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="7" class="px-6 py-8 text-center text-gray-500">
+                    <i class="fas fa-exclamation-circle text-3xl mb-3 text-red-400"></i>
+                    <p>Error al cargar las propiedades</p>
+                    <button onclick="loadProperties()" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                        <i class="fas fa-sync-alt mr-1"></i>Reintentar
+                    </button>
+                </td>
+            </tr>
+        `;
     } finally {
         UI.hideLoading('propertiesTableBody');
     }
@@ -505,11 +493,12 @@ async function guardarPropiedad() {
     submitBtn.disabled = true;
 
     try {
+        let result;
         if (id) {
-            await API.updateProperty(propertyData);
+            result = await API.updateProperty(propertyData);
             UI.toast('Propiedad actualizada', 'success');
         } else {
-            await API.createProperty(propertyData);
+            result = await API.createProperty(propertyData);
             UI.toast('Propiedad creada', 'success');
         }
 
