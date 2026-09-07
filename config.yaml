@@ -1,0 +1,5 @@
+models:
+  - provider: deepseek
+    model: deepseek-coder
+    apiKey: sk-5c1d993c796941489cb19b0b68cc0de8
+    title: DeepSeek Coder

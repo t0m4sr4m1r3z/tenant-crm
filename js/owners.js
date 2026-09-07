@@ -1,349 +1,295 @@
-// owners.js - Gestión de Propietarios (Versión con permisos) – CORREGIDO
-const API = {
+// js/owners.js - Gestión de Propietarios y Liquidaciones
+const OwnersAPI = {
     baseUrl: '/.netlify/functions',
-    
+
     async request(endpoint, options = {}) {
         const token = sessionStorage.getItem('authToken');
-
-        const isGet = !options.method || options.method === 'GET';
-        if (isGet) {
-            const cached = window.APICache ? window.APICache.get(endpoint, options) : null;
-            if (cached) {
-                return cached;
-            }
-        }
-
-        let url = `${this.baseUrl}${endpoint}`;
-        if (!options.method || options.method === 'GET') {
-            const separator = url.includes('?') ? '&' : '?';
-            url = `${url}${separator}_t=${Date.now()}`;
-        }
-
         const headers = {
             'Content-Type': 'application/json',
             ...(token && { 'Authorization': token }),
             ...options.headers
         };
 
-        try {
-            const response = await fetch(url, { ...options, headers });
-            
-            if (response.status === 401) {
-                sessionStorage.removeItem('authToken');
-                window.location.href = '/login.html';
-                throw new Error('Sesión expirada');
-            }
-            
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.error || 'Error');
-
-            if (isGet && window.APICache) {
-                window.APICache.set(endpoint, data, options);
-            }
-
-            return data;
-        } catch (error) {
-            console.error('API Error:', error);
-            throw error;
+        const res = await fetch(`${this.baseUrl}${endpoint}`, { ...options, headers });
+        if (res.status === 401) {
+            window.location.href = '/login.html';
+            throw new Error('Sesión expirada');
         }
-    },
-    
-    async getOwners() {
-        return this.request('/owners');
-    },
-    
-    async getOwnerProperties(ownerId) {
-        return this.request(`/owners?id=${ownerId}&properties=true`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || err.message || 'Error en la petición');
+        }
+        return res.json();
     },
 
-    // Si el endpoint no existe, usamos fallback
-    async getPropertiesByOwner(ownerId) {
-        try {
-            return await this.request(`/properties?owner_id=${ownerId}`);
-        } catch (e) {
-            console.warn('getPropertiesByOwner fallback:', e);
-            return { properties: [] };
-        }
-    },
-    
-    async createOwner(owner) {
-        return this.request('/owners', { method: 'POST', body: JSON.stringify(owner) });
-    },
-    
-    async updateOwner(owner) {
-        return this.request('/owners', { method: 'PUT', body: JSON.stringify(owner) });
-    },
-    
-    async deleteOwner(id) {
-        return this.request(`/owners?id=${id}`, { method: 'DELETE' });
-    }
+    getOwners() { return this.request('/owners'); },
+    getOwnerProperties(id) { return this.request(`/owners?id=${id}&properties=true`); },
+    createOwner(data) { return this.request('/owners', { method: 'POST', body: JSON.stringify(data) }); },
+    updateOwner(data) { return this.request('/owners', { method: 'PUT', body: JSON.stringify(data) }); },
+    deleteOwner(id) { return this.request(`/owners?id=${id}`, { method: 'DELETE' }); }
 };
 
-let currentOwners = [];
-let currentPropertiesData = null;
-let currentOwnerName = '';
-let currentPage = 1;
-const PAGE_SIZE = 10;
-let filteredOwners = [];
+let allOwners = [];
+let currentOwnerViewing = null;
 
-document.addEventListener('DOMContentLoaded', async () => {
-    const token = sessionStorage.getItem('authToken');
-    if (!token) {
-        window.location.href = '/login.html';
-        return;
-    }
-    
-    AppSidebar.init();
-    initModal();
-    
-    // Crear contenedor de paginación si no existe
-    if (!document.getElementById('ownersPagination')) {
-        const tableContainer = document.querySelector('.bg-white.rounded-xl.shadow-sm.border.border-gray-100.overflow-hidden');
-        if (tableContainer) {
-            const paginationDiv = document.createElement('div');
-            paginationDiv.id = 'ownersPagination';
-            paginationDiv.className = 'flex justify-between items-center px-6 py-3 bg-gray-50 border-t border-gray-200';
-            tableContainer.appendChild(paginationDiv);
-        }
-    }
-    
-    await loadOwners();
-    
-    const addBtn = document.getElementById('addOwnerBtn');
-    if (addBtn) {
-        if (!AUTH.hasPermission('canCreate')) {
-            addBtn.style.display = 'none';
-        }
-        addBtn.addEventListener('click', () => openOwnerModal());
-    }
-    
-    document.getElementById('closeModalBtn').addEventListener('click', closeModal);
-    document.getElementById('ownerForm').addEventListener('submit', saveOwner);
-    
-    // Búsqueda en propietarios
-    const searchInput = document.getElementById('searchOwners');
-    if (searchInput) {
-        searchInput.addEventListener('input', AppUtils.debounce(function(e) {
-            filtrarPropietarios(e.target.value);
-        }, 300));
-    }
+document.addEventListener('DOMContentLoaded', () => {
+    if (window.AppSidebar) AppSidebar.init();
+    if (window.Breadcrumbs) Breadcrumbs.init();
+
+    initModalEvents();
+    initSearch();
+
+    cargarOwners();
 });
 
-function initModal() {
+function initModalEvents() {
     const modal = document.getElementById('ownerModal');
-    const modalOverlay = modal?.querySelector('.absolute.inset-0.bg-gray-600');
-    if (modalOverlay) modalOverlay.addEventListener('click', closeModal);
-}
+    const addBtn = document.getElementById('addOwnerBtn');
+    const closeBtn = document.getElementById('closeModalBtn');
+    const form = document.getElementById('ownerForm');
 
-function closeModal() {
-    document.getElementById('ownerModal').classList.add('hidden');
-}
+    if (addBtn) {
+        addBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            abrirModalNuevoPropietario();
+        });
+    }
 
-function closePropertiesModal() {
-    document.getElementById('propertiesModal').classList.add('hidden');
-}
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            if (modal) modal.classList.add('hidden');
+        });
+    }
 
-// ============================================
-// FUNCIONES DE PAGINACIÓN
-// ============================================
-
-async function loadOwners() {
-    console.log('🔄 loadOwners ejecutándose...');
-    try {
-        const token = sessionStorage.getItem('authToken');
-        const response = await fetch('/.netlify/functions/owners?_t=' + Date.now(), {
-            headers: { 
-                'Authorization': token,
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache',
-                'Expires': '0'
+    if (modal) {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal || e.target.classList.contains('bg-opacity-75')) {
+                modal.classList.add('hidden');
             }
         });
-        
-        if (!response.ok) throw new Error('Error en la respuesta');
-        
-        const owners = await response.json();
-        console.log('✅ Propietarios cargados:', owners.length);
-        currentOwners = owners;
-        filteredOwners = [...currentOwners];
-        currentPage = 1;
-        renderizarOwnersPaginado();
+    }
+
+    if (form) {
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await guardarPropietario();
+        });
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            if (modal && !modal.classList.contains('hidden')) modal.classList.add('hidden');
+            const propModal = document.getElementById('propertiesModal');
+            if (propModal && !propModal.classList.contains('hidden')) propModal.classList.add('hidden');
+        }
+    });
+}
+
+function initSearch() {
+    const searchInput = document.getElementById('searchOwners');
+    if (!searchInput) return;
+
+    searchInput.addEventListener('input', (e) => {
+        const term = e.target.value.toLowerCase().trim();
+        const filtrados = allOwners.filter(o => 
+            (o.name && o.name.toLowerCase().includes(term)) ||
+            (o.dni && o.dni.toLowerCase().includes(term)) ||
+            (o.email && o.email.toLowerCase().includes(term)) ||
+            (o.phone && o.phone.toLowerCase().includes(term))
+        );
+        renderizarTablaOwners(filtrados);
+    });
+}
+
+async function cargarOwners() {
+    const tbody = document.getElementById('ownersTableBody');
+    try {
+        UI.showLoading('ownersTableBody', 'Cargando propietarios...');
+        allOwners = await OwnersAPI.getOwners();
+        renderizarTablaOwners(allOwners);
     } catch (error) {
-        console.error('Error:', error);
-        document.getElementById('ownersTableBody').innerHTML = '<tr><td colspan="6" class="text-center py-8 text-red-500">Error al cargar</td></tr>';
-        currentOwners = [];
-        filteredOwners = [];
+        console.error(error);
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-red-500">Error al cargar propietarios</td></tr>`;
+        }
+    } finally {
+        UI.hideLoading('ownersTableBody');
     }
 }
 
-function renderizarOwnersPaginado() {
-    const totalItems = filteredOwners.length;
-    const totalPages = Math.ceil(totalItems / PAGE_SIZE);
-    const start = (currentPage - 1) * PAGE_SIZE;
-    const end = start + PAGE_SIZE;
-    const pageItems = filteredOwners.slice(start, end);
-    
-    renderOwnersTable(pageItems);
-    renderPaginationOwners(totalItems, totalPages);
-}
-
-function renderOwnersTable(owners) {
+function renderizarTablaOwners(lista) {
     const tbody = document.getElementById('ownersTableBody');
-    if (!owners || owners.length === 0) {
+    if (!tbody) return;
+
+    if (!lista || lista.length === 0) {
         tbody.innerHTML = `
-            <tr><td colspan="6" class="text-center py-8">No hay propietarios registrados</td></tr>
+            <tr>
+                <td colspan="6" class="px-6 py-8 text-center text-gray-400">
+                    <i class="fas fa-user-tie text-3xl mb-2 opacity-50"></i>
+                    <p>No hay propietarios registrados</p>
+                </td>
+            </tr>
         `;
         return;
     }
-    
-    const canEdit = AUTH.hasPermission('canEdit');
-    const canDelete = AUTH.hasPermission('canDelete');
-    
-    tbody.innerHTML = owners.map(owner => `
-        <tr class="hover:bg-gray-50">
-            <td class="px-6 py-4 font-medium">${AppUtils.escapeHtml(owner.name)}</td>
-            <td class="px-6 py-4">${owner.email ? AppUtils.escapeHtml(owner.email) : '-'}</td>
-            <td class="px-6 py-4">${owner.phone ? AppUtils.escapeHtml(owner.phone) : '-'}</td>
-            <td class="px-6 py-4 text-center">${owner.total_contracts || 0}</td>
-            <td class="px-6 py-4 font-medium">${AppUtils.formatCurrency(owner.total_income || 0)}</td>
+
+    tbody.innerHTML = lista.map(o => `
+        <tr class="hover:bg-gray-50 dark:hover:bg-slate-800/50 transition border-b border-gray-100 dark:border-slate-800">
+            <td class="px-6 py-4 font-bold text-slate-900 dark:text-white">
+                ${AppUtils.escapeHtml(o.name)}
+                ${o.dni ? `<span class="block text-xs font-normal text-slate-400">DNI: ${AppUtils.escapeHtml(o.dni)}</span>` : ''}
+            </td>
+            <td class="px-6 py-4 text-slate-600 dark:text-slate-400">${AppUtils.escapeHtml(o.email || '-')}</td>
+            <td class="px-6 py-4 text-slate-600 dark:text-slate-400">${AppUtils.escapeHtml(o.phone || '-')}</td>
             <td class="px-6 py-4">
-                <div class="flex gap-2">
-                    <button onclick="viewProperties(${owner.id})" class="text-indigo-600 hover:text-indigo-800 p-1" title="Ver Propiedades" aria-label="Ver propiedades de ${AppUtils.escapeHtml(owner.name)}">
-                        <i class="fas fa-building"></i>
+                <button onclick="verPropiedadesPropietario(${o.id}, '${AppUtils.escapeHtml(o.name)}')" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 transition">
+                    <i class="fas fa-building"></i> ${o.contracts_count || 0} contratos
+                </button>
+            </td>
+            <td class="px-6 py-4 font-semibold text-emerald-600 dark:text-emerald-400">
+                ${AppUtils.formatCurrency(o.total_income || 0)}
+            </td>
+            <td class="px-6 py-4">
+                <div class="flex items-center gap-1">
+                    <button onclick="editarPropietario(${o.id})" class="text-blue-600 hover:text-blue-800 p-2 rounded-lg hover:bg-blue-50 transition" title="Editar">
+                        <i class="fas fa-edit"></i>
                     </button>
-                    ${canEdit ? `<button onclick="editOwner(${owner.id})" class="text-blue-600 hover:text-blue-800 p-1" title="Editar" aria-label="Editar propietario ${AppUtils.escapeHtml(owner.name)}"><i class="fas fa-edit"></i></button>` : ''}
-                    ${canDelete ? `<button onclick="deleteOwner(${owner.id})" class="text-red-600 hover:text-red-800 p-1" title="Eliminar" aria-label="Eliminar propietario ${AppUtils.escapeHtml(owner.name)}"><i class="fas fa-trash"></i></button>` : ''}
+                    <button onclick="eliminarPropietario(${o.id})" class="text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-50 transition" title="Eliminar">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
                 </div>
             </td>
         </tr>
     `).join('');
 }
 
-function renderPaginationOwners(totalItems, totalPages) {
-    const container = document.getElementById('ownersPagination');
-    if (!container) return;
-    
-    if (totalItems === 0) {
-        container.innerHTML = '';
+function abrirModalNuevoPropietario() {
+    const modal = document.getElementById('ownerModal');
+    const form = document.getElementById('ownerForm');
+    const title = document.getElementById('modalTitle');
+    if (!modal || !form) return;
+
+    form.reset();
+    document.getElementById('ownerId').value = '';
+    if (title) title.textContent = 'Nuevo Propietario';
+
+    modal.classList.remove('hidden');
+}
+
+function editarPropietario(id) {
+    const o = allOwners.find(item => item.id === id);
+    if (!o) return;
+
+    const modal = document.getElementById('ownerModal');
+    const title = document.getElementById('modalTitle');
+    if (!modal) return;
+
+    document.getElementById('ownerId').value = o.id;
+    document.getElementById('ownerDni').value = o.dni || '';
+    document.getElementById('ownerName').value = o.name || '';
+    document.getElementById('ownerEmail').value = o.email || '';
+    document.getElementById('ownerPhone').value = o.phone || '';
+    document.getElementById('ownerAddress').value = o.address || '';
+    document.getElementById('ownerBankAccount').value = o.bank_account || '';
+    document.getElementById('ownerNotes').value = o.notes || '';
+
+    if (title) title.textContent = 'Editar Propietario';
+    modal.classList.remove('hidden');
+}
+
+async function guardarPropietario() {
+    const id = document.getElementById('ownerId').value;
+    const dni = document.getElementById('ownerDni').value.trim();
+    const name = document.getElementById('ownerName').value.trim();
+    const email = document.getElementById('ownerEmail').value.trim();
+    const phone = document.getElementById('ownerPhone').value.trim();
+    const address = document.getElementById('ownerAddress').value.trim();
+    const bank_account = document.getElementById('ownerBankAccount').value.trim();
+    const notes = document.getElementById('ownerNotes').value.trim();
+
+    if (!name) {
+        UI.toast('El nombre es obligatorio', 'warning');
         return;
     }
-    
-    const startItem = (currentPage - 1) * PAGE_SIZE + 1;
-    const endItem = Math.min(currentPage * PAGE_SIZE, totalItems);
-    
-    container.innerHTML = `
-        <div class="flex flex-wrap items-center justify-between gap-3 w-full">
-            <div class="text-sm text-gray-600">
-                Mostrando <span class="font-medium">${startItem}</span> - <span class="font-medium">${endItem}</span> de <span class="font-medium">${totalItems}</span> propietarios
-            </div>
-            <div class="flex items-center gap-2">
-                <button onclick="irPaginaOwners(${currentPage - 1})" 
-                        class="px-3 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 transition ${currentPage === 1 ? 'opacity-50 cursor-not-allowed' : ''}"
-                        ${currentPage === 1 ? 'disabled' : ''}
-                        aria-label="Página anterior">
-                    <i class="fas fa-chevron-left"></i>
-                </button>
-                <span class="text-sm font-medium px-3 py-1 bg-blue-100 text-blue-700 rounded-lg">${currentPage} / ${totalPages}</span>
-                <button onclick="irPaginaOwners(${currentPage + 1})" 
-                        class="px-3 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 transition ${currentPage === totalPages ? 'opacity-50 cursor-not-allowed' : ''}"
-                        ${currentPage === totalPages ? 'disabled' : ''}
-                        aria-label="Página siguiente">
-                    <i class="fas fa-chevron-right"></i>
-                </button>
-            </div>
-        </div>
-    `;
-}
 
-function irPaginaOwners(page) {
-    const totalPages = Math.ceil(filteredOwners.length / PAGE_SIZE);
-    if (page < 1 || page > totalPages) return;
-    currentPage = page;
-    renderizarOwnersPaginado();
-}
+    const payload = { dni, name, email, phone, address, bank_account, notes };
 
-// ============================================
-// BÚSQUEDA Y FILTROS
-// ============================================
-
-function filtrarPropietarios(searchTerm) {
-    if (!searchTerm.trim()) {
-        filteredOwners = [...currentOwners];
-    } else {
-        const term = searchTerm.toLowerCase().trim();
-        filteredOwners = currentOwners.filter(owner => 
-            owner.name.toLowerCase().includes(term) ||
-            (owner.email && owner.email.toLowerCase().includes(term)) ||
-            (owner.dni && owner.dni.includes(term))
-        );
-    }
-    currentPage = 1;
-    renderizarOwnersPaginado();
-}
-
-// ============================================
-// FUNCIONES DE PROPIEDADES
-// ============================================
-
-async function viewProperties(ownerId) {
-    const owner = currentOwners.find(o => o.id === ownerId);
-    if (!owner) return;
-    
-    document.getElementById('modalOwnerName').textContent = `Propiedades y Contratos de ${AppUtils.escapeHtml(owner.name)}`;
-    document.getElementById('propertiesList').innerHTML = '<div class="text-center py-8"><i class="fas fa-spinner fa-spin text-2xl"></i><p class="mt-2">Cargando datos...</p></div>';
-    document.getElementById('propertiesModal').classList.remove('hidden');
-    
     try {
-        const [contractsData, propertiesData] = await Promise.all([
-            API.getOwnerProperties(ownerId),
-            API.getPropertiesByOwner(ownerId).catch(() => ({ properties: [] }))
-        ]);
-        
-        const combinedData = {
-            contracts: contractsData.contracts || [],
-            properties: propertiesData.properties || [],
-            total_monthly_income: contractsData.total_monthly_income || 0
-        };
-        
-        setPropertiesData(combinedData, owner.name, owner.email);
-        renderPropertiesList(combinedData);
-    } catch (error) {
-        document.getElementById('propertiesList').innerHTML = `<div class="text-center py-8 text-red-500">Error al cargar los datos: ${AppUtils.escapeHtml(error.message)}</div>`;
+        if (id) {
+            payload.id = parseInt(id);
+            await OwnersAPI.updateOwner(payload);
+            UI.toast('Propietario actualizado', 'success');
+        } else {
+            await OwnersAPI.createOwner(payload);
+            UI.toast('Propietario registrado', 'success');
+        }
+
+        document.getElementById('ownerModal').classList.add('hidden');
+        await cargarOwners();
+    } catch (e) {
+        UI.toast(e.message || 'Error al guardar propietario', 'error');
     }
 }
 
-function renderPropertiesList(data) {
-    const container = document.getElementById('propertiesList');
-    const contracts = data.contracts || [];
-    const properties = data.properties || [];
-    
-    setPropertiesData(data, document.getElementById('modalOwnerName').textContent.replace('Propiedades y Contratos de ', ''));
-    
-    let html = '';
-    
-    // Sección de Propiedades
-    if (properties.length > 0) {
-        html += `
-            <h4 class="font-semibold text-gray-700 mb-3 mt-4">🏢 Propiedades del Propietario</h4>
-            <div class="overflow-x-auto mb-6">
-                <table class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Dirección</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tipo</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Habitaciones</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
+async function eliminarPropietario(id) {
+    if (!confirm('¿Estás seguro de que deseas eliminar este propietario?')) return;
+
+    try {
+        await OwnersAPI.deleteOwner(id);
+        UI.toast('Propietario eliminado', 'success');
+        await cargarOwners();
+    } catch (err) {
+        UI.toast(err.message || 'No se pudo eliminar el propietario', 'error');
+    }
+}
+
+// ============================================
+// MODAL DE PROPIEDADES VINCULADAS AL PROPIETARIO
+// ============================================
+
+async function verPropiedadesPropietario(ownerId, ownerName) {
+    currentOwnerViewing = { id: ownerId, name: ownerName };
+    const modal = document.getElementById('propertiesModal');
+    const title = document.getElementById('modalOwnerName');
+    const listContainer = document.getElementById('propertiesList');
+
+    if (!modal) return;
+
+    if (title) title.textContent = `Propiedades de ${ownerName}`;
+    modal.classList.remove('hidden');
+
+    listContainer.innerHTML = `<div class="text-center py-6"><i class="fas fa-spinner fa-spin text-2xl text-blue-600"></i><p class="mt-2 text-sm text-slate-500">Cargando inmuebles...</p></div>`;
+
+    try {
+        const props = await OwnersAPI.getOwnerProperties(ownerId);
+
+        if (!props || props.length === 0) {
+            listContainer.innerHTML = `<div class="text-center py-6 text-slate-400"><i class="fas fa-building text-3xl mb-2 opacity-50"></i><p>Este propietario no tiene propiedades registradas.</p></div>`;
+            return;
+        }
+
+        listContainer.innerHTML = `
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200 dark:divide-slate-700 text-sm">
+                    <thead>
+                        <tr class="text-left text-xs uppercase text-slate-400">
+                            <th class="py-2">Dirección</th>
+                            <th class="py-2">Tipo</th>
+                            <th class="py-2">Inquilino Actual</th>
+                            <th class="py-2 text-right">Renta Mensual</th>
+                            <th class="py-2 text-center">Estado Contrato</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-gray-200">
-                        ${properties.map(p => `
+                    <tbody class="divide-y divide-gray-100 dark:divide-slate-800">
+                        ${props.map(p => `
                             <tr>
-                                <td class="px-4 py-2 font-medium">${AppUtils.escapeHtml(p.address)}</td>
-                                <td class="px-4 py-2">${AppUtils.escapeHtml(p.type || 'No especificado')}</td>
-                                <td class="px-4 py-2 text-center">${p.rooms || 0}</td>
-                                <td class="px-4 py-2">
-                                    <span class="badge ${p.status === 'disponible' ? 'badge-success' : p.status === 'alquilado' ? 'badge-info' : 'badge-warning'}">
-                                        ${p.status === 'disponible' ? 'Disponible' : p.status === 'alquilado' ? 'Alquilado' : p.status || 'N/A'}
+                                <td class="py-3 font-semibold text-slate-800 dark:text-slate-200">${AppUtils.escapeHtml(p.address)}</td>
+                                <td class="py-3 text-slate-500 uppercase text-xs">${AppUtils.escapeHtml(p.type)}</td>
+                                <td class="py-3 text-slate-700 dark:text-slate-300">${AppUtils.escapeHtml(p.tenant_name || 'Desocupada')}</td>
+                                <td class="py-3 text-right font-bold text-emerald-600">${p.base_amount ? AppUtils.formatCurrency(p.base_amount) : '-'}</td>
+                                <td class="py-3 text-center">
+                                    <span class="badge ${p.contract_status === 'active' ? 'badge-success' : 'badge-warning'}">
+                                        ${p.contract_status === 'active' ? 'Alquilada' : 'Disponible'}
                                     </span>
                                 </td>
                             </tr>
@@ -352,662 +298,19 @@ function renderPropertiesList(data) {
                 </table>
             </div>
         `;
-    } else {
-        html += `
-            <div class="text-center py-4 text-gray-500">
-                <i class="fas fa-building text-2xl mb-2 opacity-50"></i>
-                <p>No tiene propiedades registradas</p>
-            </div>
-        `;
-    }
-    
-    // Sección de Contratos
-    if (contracts.length > 0) {
-        html += `
-            <h4 class="font-semibold text-gray-700 mb-3 mt-6">📄 Contratos Activos</h4>
-            <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200" id="propertiesTable">
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Dirección</th>
-                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Inquilino</th>
-                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contacto</th>
-                            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Renta Mensual</th>
-                            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Último Pago</th>
-                            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Próximo Aumento</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-200">
-                        ${contracts.map(prop => `
-                            <tr class="hover:bg-gray-50">
-                                <td class="px-4 py-3 font-medium">${AppUtils.escapeHtml(prop.property_address || 'No especificada')}</td>
-                                <td class="px-4 py-3">${AppUtils.escapeHtml(prop.tenant_name || 'Sin inquilino')}</td>
-                                <td class="px-4 py-3">
-                                    ${prop.tenant_email ? `<div class="text-sm">${AppUtils.escapeHtml(prop.tenant_email)}</div>` : ''}
-                                    ${prop.tenant_phone ? `<div class="text-xs text-gray-500">${AppUtils.escapeHtml(prop.tenant_phone)}</div>` : ''}
-                                </td>
-                                <td class="px-4 py-3 text-right font-semibold text-green-600">${AppUtils.formatCurrency(prop.base_amount)}</td>
-                                <td class="px-4 py-3 text-center">
-                                    ${prop.last_payment_date ? `<span class="text-sm">${AppUtils.formatDate(prop.last_payment_date)}</span>` : '<span class="text-gray-400 text-sm">Sin pagos</span>'}
-                                </td>
-                                <td class="px-4 py-3 text-center">
-                                    ${prop.next_increase_date ? `
-                                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getIncreaseClass(prop.next_increase_date)}">
-                                            ${AppUtils.formatDate(prop.next_increase_date)}
-                                        </span>
-                                    ` : '<span class="text-gray-400 text-sm">No programado</span>'}
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                    <tfoot class="bg-gray-50">
-                        <tr class="font-bold">
-                            <td colspan="3" class="px-4 py-3 text-right">TOTAL MENSUAL:</td>
-                            <td class="px-4 py-3 text-right text-xl text-green-600">${AppUtils.formatCurrency(data.total_monthly_income || 0)}</td>
-                            <td colspan="2"></td>
-                        </tr>
-                    </tfoot>
-                </table>
-            </div>
-        `;
-    } else {
-        html += `
-            <div class="text-center py-4 text-gray-500 mt-4">
-                <i class="fas fa-file-contract text-2xl mb-2 opacity-50"></i>
-                <p>No tiene contratos activos</p>
-            </div>
-        `;
-    }
-    
-    container.innerHTML = html;
-}
-
-function getIncreaseClass(nextIncreaseDate) {
-    const today = new Date();
-    const increaseDate = new Date(nextIncreaseDate);
-    const daysUntil = Math.ceil((increaseDate - today) / (1000 * 60 * 60 * 24));
-    
-    if (daysUntil <= 7) return 'bg-red-100 text-red-800';
-    if (daysUntil <= 30) return 'bg-yellow-100 text-yellow-800';
-    return 'bg-green-100 text-green-800';
-}
-
-// ============================================
-// CRUD DE PROPIETARIOS CON VALIDACIONES
-// ============================================
-
-function openOwnerModal(owner = null) {
-    const modal = document.getElementById('ownerModal');
-    const title = document.getElementById('modalTitle');
-    const form = document.getElementById('ownerForm');
-    
-    form.reset();
-    document.getElementById('ownerId').value = '';
-    title.textContent = 'Nuevo Propietario';
-    
-    if (owner) {
-        title.textContent = 'Editar Propietario';
-        document.getElementById('ownerId').value = owner.id;
-        document.getElementById('ownerDni').value = owner.dni || '';
-        document.getElementById('ownerName').value = owner.name;
-        document.getElementById('ownerEmail').value = owner.email || '';
-        document.getElementById('ownerPhone').value = owner.phone || '';
-        document.getElementById('ownerAddress').value = owner.address || '';
-        document.getElementById('ownerBankAccount').value = owner.bank_account || '';
-        if (document.getElementById('ownerNotes')) {
-            document.getElementById('ownerNotes').value = owner.notes || '';
-        }
-    }
-    
-    modal.classList.remove('hidden');
-}
-
-async function saveOwner(e) {
-    e.preventDefault();
-    
-    const form = document.getElementById('ownerForm');
-    UI.clearAllFieldErrors(form);
-    
-    const nameInput = document.getElementById('ownerName');
-    const emailInput = document.getElementById('ownerEmail');
-    const phoneInput = document.getElementById('ownerPhone');
-    
-    let isValid = true;
-    
-    if (!UI.validateField(nameInput, null, null)) {
-        isValid = false;
-    }
-    
-    if (emailInput.value.trim() && !UI.validateEmail(emailInput.value.trim())) {
-        UI.showFieldError(emailInput, 'El email no es válido');
-        isValid = false;
-    }
-    
-    if (phoneInput.value.trim() && !UI.validatePhone(phoneInput.value.trim())) {
-        UI.showFieldError(phoneInput, 'El teléfono debe tener al menos 8 dígitos');
-        isValid = false;
-    }
-    
-    if (!isValid) return;
-    
-    const ownerData = {
-        name: nameInput.value.trim(),
-        email: emailInput.value.trim(),
-        phone: phoneInput.value.trim(),
-        dni: document.getElementById('ownerDni').value.trim(),
-        address: document.getElementById('ownerAddress').value.trim(),
-        bank_account: document.getElementById('ownerBankAccount').value.trim()
-    };
-    
-    const notesInput = document.getElementById('ownerNotes');
-    if (notesInput) ownerData.notes = notesInput.value.trim();
-    
-    const id = document.getElementById('ownerId').value;
-    if (id) ownerData.id = parseInt(id);
-    
-    const submitBtn = document.querySelector('#ownerForm button[type="submit"]');
-    const originalText = submitBtn.innerHTML;
-    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Guardando...';
-    submitBtn.disabled = true;
-    
-    try {
-        if (id) {
-            await API.updateOwner(ownerData);
-            UI.toast('Propietario actualizado', 'success');
-            console.log('✅ Propietario ACTUALIZADO, ID:', id);
-        } else {
-            await API.createOwner(ownerData);
-            UI.toast('Propietario creado', 'success');
-            console.log('✅ Propietario CREADO');
-        }
-        
-        closeModal();
-        
-        console.log('🔄 Llamando a loadOwners()...');
-        await loadOwners();
-        console.log('✅ loadOwners() completado');
-        
-    } catch (error) {
-        console.error('❌ Error:', error);
-        UI.toast('Error: ' + error.message, 'error');
-    } finally {
-        submitBtn.innerHTML = originalText;
-        submitBtn.disabled = false;
+    } catch (e) {
+        listContainer.innerHTML = `<p class="text-red-500 text-center py-4">Error al cargar las propiedades del propietario.</p>`;
     }
 }
 
-async function editOwner(id) {
-    const owner = currentOwners.find(o => o.id === id);
-    if (owner) openOwnerModal(owner);
+function closePropertiesModal() {
+    const modal = document.getElementById('propertiesModal');
+    if (modal) modal.classList.add('hidden');
 }
 
-async function deleteOwner(id) {
-    console.log('🗑️ deleteOwner iniciado, ID:', id);
-    if (!confirm('¿Eliminar este propietario? Se conservarán los contratos.')) return;
-    
-    try {
-        await API.deleteOwner(id);
-        UI.toast('Propietario eliminado', 'success');
-        console.log('✅ Propietario ELIMINADO, ID:', id);
-        
-        console.log('🔄 Llamando a loadOwners()...');
-        await loadOwners();
-        console.log('✅ loadOwners() completado');
-        
-    } catch (error) {
-        console.error('❌ Error:', error);
-        UI.toast('Error: ' + error.message, 'error');
-    }
-}
-
-// ============================================
-// FUNCIONES DE EXPORTACIÓN
-// ============================================
-
-function setPropertiesData(data, ownerName, ownerEmail) {
-    currentPropertiesData = data;
-    currentOwnerName = ownerName;
-    if (ownerEmail) currentPropertiesData.owner_email = ownerEmail;
-}
-
-function imprimirPropiedades() {
-    if (!currentPropertiesData) return;
-    
-    const printContent = document.getElementById('propertiesList').innerHTML;
-    const ownerName = currentOwnerName;
-    const fecha = new Date().toLocaleDateString('es-ES');
-    
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-        UI.toast('No se pudo abrir la ventana de impresión', 'error');
-        return;
-    }
-    
-    printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Propiedades de ${AppUtils.escapeHtml(ownerName)} - Tenant CRM</title>
-            <script src="https://cdn.tailwindcss.com"><\/script>
-            <style>
-                @media print {
-                    body { padding: 20px; }
-                    .no-print { display: none; }
-                }
-                body { font-family: 'Inter', sans-serif; padding: 20px; }
-                h1 { color: #4f46e5; margin-bottom: 10px; }
-                table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                th { background-color: #4f46e5; color: white; padding: 10px; text-align: left; }
-                td { padding: 10px; border-bottom: 1px solid #e5e7eb; }
-                .total { margin-top: 20px; text-align: right; font-weight: bold; }
-            </style>
-        </head>
-        <body>
-            <h1>Tenant CRM - Propiedades de ${AppUtils.escapeHtml(ownerName)}</h1>
-            <p>Fecha de generación: ${fecha}</p>
-            ${printContent}
-            <div class="no-print text-center mt-8">
-                <button onclick="window.print()" class="px-4 py-2 bg-blue-600 text-white rounded-lg">
-                    Imprimir
-                </button>
-            </div>
-        </body>
-        </html>
-    `);
-    printWindow.document.close();
-}
-
-function exportarPropiedadesPDF() {
-    if (!currentPropertiesData) return;
-    
-    try {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF('landscape', 'mm', 'a4');
-        const ownerName = currentOwnerName;
-        const fecha = new Date().toLocaleDateString('es-ES');
-        
-        doc.setFontSize(18);
-        doc.setTextColor(79, 70, 229);
-        doc.text(`Propiedades de ${ownerName}`, 14, 22);
-        
-        doc.setFontSize(10);
-        doc.setTextColor(0, 0, 0);
-        doc.text(`Fecha: ${fecha}`, 14, 32);
-        
-        const properties = currentPropertiesData.contracts || [];
-        const tableHeaders = [['Dirección', 'Inquilino', 'Contacto', 'Renta Mensual', 'Último Pago', 'Próximo Aumento']];
-        const tableBody = properties.map(prop => [
-            prop.property_address || 'No especificada',
-            prop.tenant_name || 'Sin inquilino',
-            prop.tenant_email || prop.tenant_phone || '-',
-            AppUtils.formatCurrency(prop.base_amount),
-            prop.last_payment_date ? AppUtils.formatDate(prop.last_payment_date) : 'Sin pagos',
-            prop.next_increase_date ? AppUtils.formatDate(prop.next_increase_date) : 'No programado'
-        ]);
-        
-        tableBody.push(['', '', '', `TOTAL: ${AppUtils.formatCurrency(currentPropertiesData.total_monthly_income || 0)}`, '', '']);
-        
-        doc.autoTable({
-            head: tableHeaders,
-            body: tableBody,
-            startY: 40,
-            theme: 'striped',
-            styles: { fontSize: 9 },
-            headStyles: { fillColor: [79, 70, 229] },
-            columnStyles: {
-                0: { cellWidth: 40 },
-                1: { cellWidth: 35 },
-                2: { cellWidth: 45 },
-                3: { cellWidth: 25 },
-                4: { cellWidth: 25 },
-                5: { cellWidth: 25 }
-            }
-        });
-        
-        doc.save(`propiedades_${ownerName.replace(/\s/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`);
-        UI.toast('PDF generado correctamente', 'success');
-        
-    } catch (error) {
-        console.error('Error generando PDF:', error);
-        UI.toast('Error al generar PDF', 'error');
-    }
-}
-
-function exportarPropiedadesExcel() {
-    if (!currentPropertiesData) return;
-    
-    try {
-        const properties = currentPropertiesData.contracts || [];
-        const ownerName = currentOwnerName;
-        
-        const excelData = properties.map(prop => ({
-            'Dirección': prop.property_address || 'No especificada',
-            'Inquilino': prop.tenant_name || 'Sin inquilino',
-            'Email Inquilino': prop.tenant_email || '-',
-            'Teléfono Inquilino': prop.tenant_phone || '-',
-            'Renta Mensual': AppUtils.formatCurrency(prop.base_amount),
-            'Último Pago': prop.last_payment_date ? AppUtils.formatDate(prop.last_payment_date) : 'Sin pagos',
-            'Próximo Aumento': prop.next_increase_date ? AppUtils.formatDate(prop.next_increase_date) : 'No programado'
-        }));
-        
-        excelData.push({
-            'Dirección': 'TOTAL',
-            'Inquilino': '',
-            'Email Inquilino': '',
-            'Teléfono Inquilino': '',
-            'Renta Mensual': AppUtils.formatCurrency(currentPropertiesData.total_monthly_income || 0),
-            'Último Pago': '',
-            'Próximo Aumento': ''
-        });
-        
-        const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.json_to_sheet(excelData);
-        XLSX.utils.book_append_sheet(wb, ws, 'Propiedades');
-        
-        XLSX.writeFile(wb, `propiedades_${ownerName.replace(/\s/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`);
-        UI.toast('Excel generado correctamente', 'success');
-        
-    } catch (error) {
-        console.error('Error generando Excel:', error);
-        UI.toast('Error al generar Excel', 'error');
-    }
-}
-
-function generarTextoReporte() {
-    const properties = currentPropertiesData.contracts || [];
-    const fecha = new Date().toLocaleDateString('es-ES', {
-        year: 'numeric', month: 'long', day: 'numeric'
-    });
-    const totalIncome = currentPropertiesData.total_monthly_income || 0;
-    
-    let text = `========================================\n`;
-    text += `📊 REPORTE DE PROPIEDADES EN ALQUILER\n`;
-    text += `========================================\n\n`;
-    text += `👤 PROPIETARIO: ${AppUtils.escapeHtml(currentOwnerName)}\n`;
-    text += `📅 FECHA: ${fecha}\n\n`;
-    text += `========================================\n`;
-    text += `📋 PROPIEDADES EN ALQUILER\n`;
-    text += `========================================\n\n`;
-    
-    properties.forEach((prop, index) => {
-        text += `[${index + 1}] ${'='.repeat(40)}\n`;
-        text += `🏠 DIRECCIÓN: ${AppUtils.escapeHtml(prop.property_address || 'No especificada')}\n`;
-        text += `👤 INQUILINO: ${AppUtils.escapeHtml(prop.tenant_name || 'Sin inquilino')}\n`;
-        if (prop.tenant_email) text += `📧 EMAIL INQUILINO: ${AppUtils.escapeHtml(prop.tenant_email)}\n`;
-        if (prop.tenant_phone) text += `📞 TELÉFONO INQUILINO: ${AppUtils.escapeHtml(prop.tenant_phone)}\n`;
-        text += `💰 RENTA MENSUAL: ${AppUtils.formatCurrency(prop.base_amount || 0)}\n`;
-        text += `📅 ÚLTIMO PAGO: ${prop.last_payment_date ? new Date(prop.last_payment_date).toLocaleDateString() : 'Sin pagos registrados'}\n`;
-        text += `📈 PRÓXIMO AUMENTO: ${prop.next_increase_date ? new Date(prop.next_increase_date).toLocaleDateString() : 'No programado'}\n\n`;
-    });
-    
-    text += `========================================\n`;
-    text += `💰 RESUMEN FINANCIERO\n`;
-    text += `========================================\n`;
-    text += `🏘️ TOTAL PROPIEDADES: ${properties.length}\n`;
-    text += `💰 INGRESO MENSUAL TOTAL: ${AppUtils.formatCurrency(totalIncome)}\n`;
-    if (properties.length > 0) {
-        text += `📊 PROMEDIO POR PROPIEDAD: ${AppUtils.formatCurrency(Math.round(totalIncome / properties.length))}\n`;
-    }
-    text += `\n========================================\n`;
-    text += `📧 Este reporte fue generado automáticamente por Mortola y Asociados\n`;
-    text += `========================================\n`;
-    
-    return text;
-}
-
-function enviarEmailPropietario() {
-    if (!currentPropertiesData || !currentOwnerName) {
-        UI.toast('No hay datos para enviar', 'error');
-        return;
-    }
-    
-    const ownerEmail = currentPropertiesData.owner_email;
-    
-    if (!ownerEmail) {
-        UI.toast('El propietario no tiene email registrado', 'warning');
-        return;
-    }
-    
-    const subject = `Reporte de Propiedades - ${currentOwnerName} - Tenant CRM`;
-    const body = generarTextoReporte();
-    
-    const encodedSubject = encodeURIComponent(subject);
-    const encodedBody = encodeURIComponent(body);
-    
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    
-    let mailtoLink;
-    
-    if (isMobile) {
-        mailtoLink = `intent://mailto:${ownerEmail}?subject=${encodedSubject}&body=${encodedBody}#Intent;scheme=mailto;package=com.google.android.gm;end`;
-    } else {
-        mailtoLink = `https://mail.google.com/mail/?view=cm&fs=1&to=${ownerEmail}&su=${encodedSubject}&body=${encodedBody}`;
-    }
-    
-    window.open(mailtoLink, '_blank');
-    UI.toast('Abriendo Gmail...', 'info');
-}
-
-function enviarEmailOutlook() {
-    if (!currentPropertiesData || !currentOwnerName) return;
-    
-    const ownerEmail = currentPropertiesData.owner_email;
-    if (!ownerEmail) {
-        UI.toast('El propietario no tiene email registrado', 'warning');
-        return;
-    }
-    
-    const subject = `Reporte de Propiedades - ${currentOwnerName} - Tenant CRM`;
-    const body = generarTextoReporte();
-    
-    const encodedSubject = encodeURIComponent(subject);
-    const encodedBody = encodeURIComponent(body);
-    
-    const outlookLink = `https://outlook.live.com/mail/0/deeplink/compose?to=${ownerEmail}&subject=${encodedSubject}&body=${encodedBody}`;
-    
-    window.open(outlookLink, '_blank');
-    UI.toast('Abriendo Outlook...', 'info');
-}
-
-function generarHTMLReportePropiedades() {
-    const properties = currentPropertiesData.contracts || [];
-    const ownerName = currentOwnerName;
-    const fecha = new Date().toLocaleDateString('es-ES', {
-        year: 'numeric', month: 'long', day: 'numeric'
-    });
-    const totalIncome = currentPropertiesData.total_monthly_income || 0;
-    
-    let tableRows = '';
-    properties.forEach(prop => {
-        const lastPayment = prop.last_payment_date ? AppUtils.formatDate(prop.last_payment_date) : 'Sin pagos';
-        const nextIncrease = prop.next_increase_date ? AppUtils.formatDate(prop.next_increase_date) : 'No programado';
-        
-        tableRows += `
-            <tr style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 12px 8px;">${AppUtils.escapeHtml(prop.property_address || 'No especificada')}</td>
-                <td style="padding: 12px 8px;">${AppUtils.escapeHtml(prop.tenant_name || 'Sin inquilino')}</td>
-                <td style="padding: 12px 8px;">${AppUtils.escapeHtml(prop.tenant_email || '-')}<br><small style="color:#6b7280;">${AppUtils.escapeHtml(prop.tenant_phone || '')}</small></td>
-                <td style="padding: 12px 8px; text-align: right; font-weight: bold; color: #10b981;">${AppUtils.formatCurrency(prop.base_amount || 0)}</td>
-                <td style="padding: 12px 8px; text-align: center;">${lastPayment}</td>
-                <td style="padding: 12px 8px; text-align: center;">${nextIncrease}</td>
-            </tr>
-        `;
-    });
-    
-    return `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Reporte de Propiedades - ${AppUtils.escapeHtml(ownerName)}</title>
-            <style>
-                body {
-                    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                    line-height: 1.5;
-                    color: #1f2937;
-                    background-color: #f9fafb;
-                    margin: 0;
-                    padding: 20px;
-                }
-                .container {
-                    max-width: 1200px;
-                    margin: 0 auto;
-                    background: white;
-                    border-radius: 16px;
-                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-                    overflow: hidden;
-                }
-                .header {
-                    background: linear-gradient(135deg, #4f46e5, #7c3aed);
-                    color: white;
-                    padding: 30px;
-                    text-align: center;
-                }
-                .header h1 {
-                    margin: 0;
-                    font-size: 28px;
-                    font-weight: 700;
-                }
-                .header p {
-                    margin: 10px 0 0;
-                    opacity: 0.9;
-                }
-                .content {
-                    padding: 30px;
-                }
-                .summary {
-                    background: #f3f4f6;
-                    border-radius: 12px;
-                    padding: 20px;
-                    margin-bottom: 30px;
-                    display: flex;
-                    justify-content: space-around;
-                    text-align: center;
-                }
-                .summary-item {
-                    flex: 1;
-                }
-                .summary-label {
-                    font-size: 14px;
-                    color: #6b7280;
-                    margin-bottom: 5px;
-                }
-                .summary-value {
-                    font-size: 24px;
-                    font-weight: bold;
-                    color: #4f46e5;
-                }
-                table {
-                    width: 100%;
-                    border-collapse: collapse;
-                    margin-top: 20px;
-                }
-                th {
-                    background-color: #f9fafb;
-                    padding: 12px 8px;
-                    text-align: left;
-                    font-size: 12px;
-                    font-weight: 600;
-                    color: #6b7280;
-                    text-transform: uppercase;
-                    letter-spacing: 0.5px;
-                    border-bottom: 2px solid #e5e7eb;
-                }
-                td {
-                    padding: 12px 8px;
-                    vertical-align: top;
-                }
-                .footer {
-                    background: #f9fafb;
-                    padding: 20px;
-                    text-align: center;
-                    font-size: 12px;
-                    color: #9ca3af;
-                    border-top: 1px solid #e5e7eb;
-                }
-                .badge {
-                    display: inline-block;
-                    padding: 2px 8px;
-                    border-radius: 9999px;
-                    font-size: 12px;
-                    font-weight: 500;
-                }
-                .badge-green {
-                    background-color: #d1fae5;
-                    color: #065f46;
-                }
-                .badge-yellow {
-                    background-color: #fef3c7;
-                    color: #92400e;
-                }
-                .badge-red {
-                    background-color: #fee2e2;
-                    color: #991b1b;
-                }
-                @media (max-width: 640px) {
-                    .content { padding: 15px; }
-                    th, td { font-size: 12px; padding: 8px 4px; }
-                }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>🏢 Tenant CRM</h1>
-                    <p>Reporte de Propiedades en Alquiler</p>
-                </div>
-                <div class="content">
-                    <h2 style="font-size: 20px; margin-bottom: 10px;">${AppUtils.escapeHtml(ownerName)}</h2>
-                    <p style="color: #6b7280; margin-bottom: 20px;">Fecha de generación: ${fecha}</p>
-                    
-                    <div class="summary">
-                        <div class="summary-item">
-                            <div class="summary-label">Propiedades Activas</div>
-                            <div class="summary-value">${properties.length}</div>
-                        </div>
-                        <div class="summary-item">
-                            <div class="summary-label">Ingreso Mensual Total</div>
-                            <div class="summary-value">${AppUtils.formatCurrency(totalIncome)}</div>
-                        </div>
-                        <div class="summary-item">
-                            <div class="summary-label">Promedio por Propiedad</div>
-                            <div class="summary-value">${properties.length > 0 ? AppUtils.formatCurrency(Math.round(totalIncome / properties.length)) : '$0'}</div>
-                        </div>
-                    </div>
-                    
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Dirección</th>
-                                <th>Inquilino</th>
-                                <th>Contacto</th>
-                                <th style="text-align: right">Renta Mensual</th>
-                                <th style="text-align: center">Último Pago</th>
-                                <th style="text-align: center">Próximo Aumento</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${tableRows}
-                        </tbody>
-                    </table>
-                </div>
-                <div class="footer">
-                    <p>Este reporte fue generado automáticamente por Mortola y Asociados.</p>
-                    <p>© ${new Date().getFullYear()} Mortola y Asociados - Negocio Inmobiliario</p>
-                </div>
-            </div>
-        </body>
-        </html>
-    `;
-}
-
-// ============================================
-// FUNCIONES GLOBALES
-// ============================================
-
-window.viewProperties = viewProperties;
-window.editOwner = editOwner;
-window.deleteOwner = deleteOwner;
+// Exportar al objeto global
+window.abrirModalNuevoPropietario = abrirModalNuevoPropietario;
+window.editarPropietario = editarPropietario;
+window.eliminarPropietario = eliminarPropietario;
+window.verPropiedadesPropietario = verPropiedadesPropietario;
 window.closePropertiesModal = closePropertiesModal;
-window.irPaginaOwners = irPaginaOwners;

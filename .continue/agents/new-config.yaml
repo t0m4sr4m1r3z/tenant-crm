@@ -1,0 +1,67 @@
+# ~/.continue/config.yaml
+# o en la carpeta .continue/ de tu proyecto
+
+models:
+  - title: DeepSeek Coder
+    provider: deepseek
+    model: deepseek-coder
+    apiKey: sk-5c1d993c796941489cb19b0b68cc0de8
+    contextLength: 16000
+    completionOptions:
+      temperature: 0.2
+      topP: 0.95
+      maxTokens: 4096
+
+# Si quieres usar el modelo chat de DeepSeek (no solo código)
+  - title: DeepSeek Chat
+    provider: deepseek
+    model: deepseek-chat
+    apiKey: sk-5c1d993c796941489cb19b0b68cc0de8
+    contextLength: 32000
+    completionOptions:
+      temperature: 0.7
+      topP: 0.9
+      maxTokens: 4096
+
+# Opcional: establecer el modelo por defecto
+defaultModel: DeepSeek Coder
+
+# Configuración de autocompletado (tab)
+tabAutocompleteModel:
+  title: DeepSeek Coder Autocomplete
+  provider: deepseek
+  model: deepseek-coder
+  apiKey: sk-5c1d993c796941489cb19b0b68cc0de8
+  completionOptions:
+    temperature: 0.1
+    maxTokens: 256
+
+# Configuración de embeddings para RAG (opcional)
+# embeddingsProvider:
+#   provider: deepseek
+#   model: deepseek-embed
+#   apiKey: TU_API_KEY_AQUÍ
+
+experimental:
+  disableSessionTitles: true
+
+# Personalización de comandos rápidos (slashes)
+slashCommands:
+  - name: explain
+    description: Explica el código seleccionado
+    prompt: "Explica este código de forma clara y detallada:"
+  - name: refactor
+    description: Refactoriza el código seleccionado
+    prompt: "Refactoriza este código manteniendo la misma funcionalidad:"
+  - name: test
+    description: Genera tests unitarios
+    prompt: "Genera tests unitarios para este código:"
+  - name: docs
+    description: Genera documentación
+    prompt: "Genera documentación JSDoc/type hints para este código:"
+
+# Contexto personalizado (opcional)
+contextProviders:
+  - name: codebase
+    params:
+      maxResults: 15

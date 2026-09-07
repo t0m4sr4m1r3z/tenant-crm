@@ -1,187 +1,166 @@
-// netlify/functions/properties.js - CRUD completo de propiedades
-const { neon } = require('@neondatabase/serverless');
+// netlify/functions/properties.js
+const { getDb } = require('./db/config');
 
-const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Content-Type': 'application/json'
-};
+exports.handler = async (event, context) => {
+    const headers = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Content-Type': 'application/json'
+    };
 
-exports.handler = async (event) => {
     if (event.httpMethod === 'OPTIONS') {
-        return { statusCode: 204, headers };
+        return { statusCode: 200, headers, body: '' };
     }
 
     try {
-        const sql = neon(process.env.DATABASE_URL);
-        const method = event.httpMethod;
-        const queryParams = event.queryStringParameters || {};
+        const sql = getDb();
 
-        // ===== GET =====
-        if (method === 'GET') {
-            // Si tiene id, obtener una propiedad específica
-            if (queryParams.id) {
-                const id = parseInt(queryParams.id);
-                const result = await sql`
-                    SELECT p.*, o.name as owner_name 
-                    FROM properties p
-                    LEFT JOIN owners o ON p.owner_id = o.id
-                    WHERE p.id = ${id}
-                `;
-                return {
-                    statusCode: 200,
-                    headers,
-                    body: JSON.stringify(result[0] || {})
-                };
-            }
+        // 1. Auto-migración de la tabla properties
+        await sql`
+            CREATE TABLE IF NOT EXISTS properties (
+                id SERIAL PRIMARY KEY,
+                owner_id INTEGER NOT NULL,
+                address VARCHAR(255) NOT NULL,
+                type VARCHAR(50) DEFAULT 'departamento',
+                rooms INTEGER DEFAULT 0,
+                bathrooms INTEGER DEFAULT 0,
+                covered_area NUMERIC(10, 2) DEFAULT 0,
+                uncovered_area NUMERIC(10, 2) DEFAULT 0,
+                status VARCHAR(30) DEFAULT 'disponible',
+                description TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+        `;
 
-            // Si tiene owner_id, filtrar por propietario
-            if (queryParams.owner_id) {
-                const ownerId = parseInt(queryParams.owner_id);
-                const result = await sql`
-                    SELECT p.*, o.name as owner_name 
-                    FROM properties p
-                    LEFT JOIN owners o ON p.owner_id = o.id
-                    WHERE p.owner_id = ${ownerId}
-                    ORDER BY p.id DESC
-                `;
-                return {
-                    statusCode: 200,
-                    headers,
-                    body: JSON.stringify(result)
-                };
-            }
-
-            // Listar todas las propiedades
-            const result = await sql`
-                SELECT p.*, o.name as owner_name 
+        // ========================================================
+        // GET: Listar propiedades
+        // ========================================================
+        if (event.httpMethod === 'GET') {
+            const properties = await sql`
+                SELECT 
+                    p.*,
+                    o.name as owner_name,
+                    o.dni as owner_dni
                 FROM properties p
                 LEFT JOIN owners o ON p.owner_id = o.id
-                ORDER BY p.id DESC
+                ORDER BY p.id DESC;
             `;
+
             return {
                 statusCode: 200,
                 headers,
-                body: JSON.stringify(result)
+                body: JSON.stringify(properties)
             };
         }
 
-        // ===== POST =====
-        if (method === 'POST') {
-            const data = JSON.parse(event.body);
-            
-            if (!data.address || !data.owner_id || !data.type) {
+        // ========================================================
+        // POST: Crear propiedad
+        // ========================================================
+        if (event.httpMethod === 'POST') {
+            const body = JSON.parse(event.body || '{}');
+            const { address, owner_id, type, rooms, bathrooms, covered_area, uncovered_area, status, description } = body;
+
+            if (!address || !owner_id) {
                 return {
                     statusCode: 400,
                     headers,
-                    body: JSON.stringify({ 
-                        error: 'Faltan campos obligatorios: address, owner_id, type' 
-                    })
+                    body: JSON.stringify({ error: 'Dirección y Propietario son obligatorios' })
                 };
             }
 
-            const result = await sql`
+            const nueva = await sql`
                 INSERT INTO properties (
-                    address, owner_id, type, rooms, bathrooms, 
-                    covered_area, uncovered_area, status, description
+                    address, owner_id, type, rooms, bathrooms, covered_area, uncovered_area, status, description, updated_at
                 ) VALUES (
-                    ${data.address}, 
-                    ${data.owner_id}, 
-                    ${data.type}, 
-                    ${data.rooms || 0}, 
-                    ${data.bathrooms || 0}, 
-                    ${data.covered_area || null}, 
-                    ${data.uncovered_area || null}, 
-                    ${data.status || 'disponible'}, 
-                    ${data.description || ''}
+                    ${address},
+                    ${parseInt(owner_id)},
+                    ${type || 'departamento'},
+                    ${parseInt(rooms) || 0},
+                    ${parseInt(bathrooms) || 0},
+                    ${parseFloat(covered_area) || 0},
+                    ${parseFloat(uncovered_area) || 0},
+                    ${status || 'disponible'},
+                    ${description || null},
+                    NOW()
                 )
-                RETURNING *
+                RETURNING *;
             `;
-            
+
             return {
                 statusCode: 201,
                 headers,
-                body: JSON.stringify(result[0])
+                body: JSON.stringify(nueva[0])
             };
         }
 
-        // ===== PUT =====
-        if (method === 'PUT') {
-            const data = JSON.parse(event.body);
-            
-            if (!data.id) {
+        // ========================================================
+        // PUT: Actualizar propiedad
+        // ========================================================
+        if (event.httpMethod === 'PUT') {
+            const body = JSON.parse(event.body || '{}');
+            const { id, address, owner_id, type, rooms, bathrooms, covered_area, uncovered_area, status, description } = body;
+
+            if (!id || !address || !owner_id) {
                 return {
                     statusCode: 400,
                     headers,
-                    body: JSON.stringify({ error: 'ID de propiedad requerido' })
+                    body: JSON.stringify({ error: 'ID, Dirección y Propietario son obligatorios' })
                 };
             }
 
-            const result = await sql`
-                UPDATE properties SET
-                    address = ${data.address},
-                    owner_id = ${data.owner_id},
-                    type = ${data.type},
-                    rooms = ${data.rooms || 0},
-                    bathrooms = ${data.bathrooms || 0},
-                    covered_area = ${data.covered_area || null},
-                    uncovered_area = ${data.uncovered_area || null},
-                    status = ${data.status || 'disponible'},
-                    description = ${data.description || ''},
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ${data.id}
-                RETURNING *
+            const actualizada = await sql`
+                UPDATE properties
+                SET 
+                    address = ${address},
+                    owner_id = ${parseInt(owner_id)},
+                    type = ${type || 'departamento'},
+                    rooms = ${parseInt(rooms) || 0},
+                    bathrooms = ${parseInt(bathrooms) || 0},
+                    covered_area = ${parseFloat(covered_area) || 0},
+                    uncovered_area = ${parseFloat(uncovered_area) || 0},
+                    status = ${status || 'disponible'},
+                    description = ${description || null},
+                    updated_at = NOW()
+                WHERE id = ${id}
+                RETURNING *;
             `;
-            
-            if (result.length === 0) {
+
+            if (actualizada.length === 0) {
                 return {
                     statusCode: 404,
                     headers,
                     body: JSON.stringify({ error: 'Propiedad no encontrada' })
                 };
             }
-            
+
             return {
                 statusCode: 200,
                 headers,
-                body: JSON.stringify(result[0])
+                body: JSON.stringify(actualizada[0])
             };
         }
 
-        // ===== DELETE =====
-        if (method === 'DELETE') {
-            const id = parseInt(queryParams.id);
-            
+        // ========================================================
+        // DELETE: Eliminar propiedad
+        // ========================================================
+        if (event.httpMethod === 'DELETE') {
+            const id = event.queryStringParameters?.id;
             if (!id) {
                 return {
                     statusCode: 400,
                     headers,
-                    body: JSON.stringify({ error: 'ID de propiedad requerido' })
+                    body: JSON.stringify({ error: 'ID requerido' })
                 };
             }
 
-            const result = await sql`
-                DELETE FROM properties 
-                WHERE id = ${id}
-                RETURNING id
-            `;
-            
-            if (result.length === 0) {
-                return {
-                    statusCode: 404,
-                    headers,
-                    body: JSON.stringify({ error: 'Propiedad no encontrada' })
-                };
-            }
-            
+            await sql`DELETE FROM properties WHERE id = ${id};`;
+
             return {
                 statusCode: 200,
                 headers,
-                body: JSON.stringify({ 
-                    success: true, 
-                    message: 'Propiedad eliminada correctamente' 
-                })
+                body: JSON.stringify({ success: true, message: 'Propiedad eliminada' })
             };
         }
 
@@ -192,11 +171,11 @@ exports.handler = async (event) => {
         };
 
     } catch (error) {
-        console.error('Error en properties:', error);
+        console.error('❌ Error en netlify/functions/properties.js:', error);
         return {
             statusCode: 500,
             headers,
-            body: JSON.stringify({ error: error.message })
+            body: JSON.stringify({ error: error.message || 'Error interno del servidor' })
         };
     }
 };

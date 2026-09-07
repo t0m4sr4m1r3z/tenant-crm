@@ -1,22 +1,12 @@
+// netlify/functions/contracts.js
 const { getDb } = require('./db/config');
-
-function calculateNextIncreaseDate(startDate, increaseFrequency, lastIncreaseDate = null) {
-    try {
-        const baseDate = lastIncreaseDate ? new Date(lastIncreaseDate) : new Date(startDate);
-        const nextDate = new Date(baseDate);
-        nextDate.setMonth(nextDate.getMonth() + parseInt(increaseFrequency));
-        return nextDate.toISOString().split('T')[0];
-    } catch (error) {
-        console.error('Error calculando fecha:', error);
-        return null;
-    }
-}
 
 exports.handler = async (event, context) => {
     const headers = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS'
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Content-Type': 'application/json'
     };
 
     if (event.httpMethod === 'OPTIONS') {
@@ -24,246 +14,273 @@ exports.handler = async (event, context) => {
     }
 
     try {
-        console.log('📄 Contracts function called with method:', event.httpMethod);
+        const sql = getDb();
 
-        const authHeader = event.headers.authorization;
-        if (!authHeader) {
+        // 1. Auto-creación y auto-migración de la tabla contracts
+        await sql`
+            CREATE TABLE IF NOT EXISTS contracts (
+                id SERIAL PRIMARY KEY,
+                tenant_id INTEGER NOT NULL,
+                owner_id INTEGER NOT NULL,
+                property_id INTEGER,
+                start_date DATE NOT NULL,
+                reference_date DATE,
+                duration INTEGER NOT NULL DEFAULT 24,
+                base_amount NUMERIC(12, 2) NOT NULL,
+                increase_type VARCHAR(20) DEFAULT 'fixed',
+                increase_value NUMERIC(8, 2) DEFAULT 0,
+                increase_frequency INTEGER DEFAULT 12,
+                agent_commission NUMERIC(5, 2) DEFAULT 5,
+                status VARCHAR(20) DEFAULT 'active',
+                next_increase_date DATE,
+                documents JSONB DEFAULT '[]'::jsonb,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+        `;
+
+        // Columnas añadidas dinámicamente si la tabla ya existía
+        await sql`ALTER TABLE contracts ADD COLUMN IF NOT EXISTS property_id INTEGER;`;
+        await sql`ALTER TABLE contracts ADD COLUMN IF NOT EXISTS reference_date DATE;`;
+        await sql`ALTER TABLE contracts ADD COLUMN IF NOT EXISTS next_increase_date DATE;`;
+        await sql`ALTER TABLE contracts ADD COLUMN IF NOT EXISTS documents JSONB DEFAULT '[]'::jsonb;`;
+        await sql`ALTER TABLE contracts ADD COLUMN IF NOT EXISTS agent_commission NUMERIC(5, 2) DEFAULT 5;`;
+
+        // ========================================================
+        // GET: Listar todos los contratos con sus relaciones
+        // ========================================================
+        if (event.httpMethod === 'GET') {
+            const contracts = await sql`
+                SELECT 
+                    c.id,
+                    c.tenant_id,
+                    c.owner_id,
+                    c.property_id,
+                    c.start_date,
+                    c.reference_date,
+                    c.duration,
+                    c.base_amount,
+                    c.increase_type,
+                    c.increase_value,
+                    c.increase_frequency,
+                    c.agent_commission,
+                    c.status,
+                    c.next_increase_date,
+                    COALESCE(c.documents, '[]'::jsonb) as documents,
+                    t.name as tenant_name,
+                    t.dni as tenant_dni,
+                    t.email as tenant_email,
+                    t.phone as tenant_phone,
+                    o.name as owner_name,
+                    o.dni as owner_dni,
+                    p.address as property_address,
+                    p.type as property_type
+                FROM contracts c
+                LEFT JOIN tenants t ON c.tenant_id = t.id
+                LEFT JOIN owners o ON c.owner_id = o.id
+                LEFT JOIN properties p ON c.property_id = p.id
+                ORDER BY c.id DESC;
+            `;
+
             return {
-                statusCode: 401,
-                headers: { ...headers, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ error: 'No autorizado' })
+                statusCode: 200,
+                headers,
+                body: JSON.stringify(contracts)
             };
         }
 
-        const sql = getDb();
-        console.log('✅ Conectado a Neon DB');
+        // Función auxiliar para calcular la fecha del próximo aumento
+        const calcularProximoAumento = (fechaInicioStr, frecuenciaMeses) => {
+            if (!fechaInicioStr || !frecuenciaMeses) return null;
+            const hoy = new Date();
+            let fecha = new Date(fechaInicioStr);
+            const freq = parseInt(frecuenciaMeses, 10) || 12;
 
-        switch (event.httpMethod) {
-            case 'GET':
-                console.log('📋 GET all contracts');
-                const contracts = await sql`
-                    SELECT 
-                        c.*,
-                        t.name as tenant_name,
-                        t.email as tenant_email,
-                        t.dni as tenant_dni,
-                        o.name as owner_name
-                    FROM contracts c
-                    LEFT JOIN tenants t ON c.tenant_id = t.id
-                    LEFT JOIN owners o ON c.owner_id = o.id
-                    ORDER BY c.created_at DESC
-                `;
-                console.log(`✅ Encontrados ${contracts.length} contratos`);
-                return {
-                    statusCode: 200,
-                    headers,
-                    body: JSON.stringify(contracts)
-                };
+            // Avanzar en intervalos de "freq" meses hasta encontrar una fecha futura
+            while (fecha <= hoy) {
+                fecha.setMonth(fecha.getMonth() + freq);
+            }
+            return fecha.toISOString().split('T')[0];
+        };
 
-            case 'POST':
-                console.log('📝 POST new contract');
-                const newContract = JSON.parse(event.body);
-                
-                if (!newContract.tenantId) {
-                    return {
-                        statusCode: 400,
-                        headers,
-                        body: JSON.stringify({ error: 'El inquilino es requerido' })
-                    };
-                }
-                
-                const startDate = new Date(newContract.startDate);
-                const endDate = new Date(startDate);
-                endDate.setMonth(endDate.getMonth() + parseInt(newContract.duration));
-                
-                const nextIncreaseDate = calculateNextIncreaseDate(
-                    newContract.startDate,
-                    newContract.increaseFrequency || 12
-                );
-                
-                // Usar fecha de referencia si existe, sino usar fecha de inicio
-                const referenceDate = newContract.referenceDate || newContract.startDate;
-                
-                const result = await sql`
-                    INSERT INTO contracts (
-                        tenant_id, owner_id, property_address, base_amount,
-                        duration, start_date, end_date, increase_type,
-                        increase_value, increase_frequency, next_increase_date,
-                        agent_commission, status, reference_date
-                    ) VALUES (
-                        ${newContract.tenantId},
-                        ${newContract.ownerId || null},
-                        ${newContract.propertyAddress || null},
-                        ${newContract.baseAmount},
-                        ${newContract.duration},
-                        ${startDate.toISOString().split('T')[0]},
-                        ${endDate.toISOString().split('T')[0]},
-                        ${newContract.increaseType || 'fixed'},
-                        ${newContract.increaseValue || null},
-                        ${newContract.increaseFrequency || 12},
-                        ${nextIncreaseDate},
-                        ${newContract.agentCommission || 5},
-                        ${newContract.status || 'active'},
-                        ${referenceDate}
-                    ) RETURNING *
-                `;
-                
-                console.log('✅ Contrato creado:', result[0].id);
-                return {
-                    statusCode: 201,
-                    headers,
-                    body: JSON.stringify(result[0])
-                };
+        // ========================================================
+        // POST: Crear nuevo contrato
+        // ========================================================
+        if (event.httpMethod === 'POST') {
+            const body = JSON.parse(event.body || '{}');
+            const {
+                tenant_id,
+                owner_id,
+                property_id,
+                start_date,
+                reference_date,
+                duration,
+                base_amount,
+                increase_type,
+                increase_value,
+                increase_frequency,
+                agent_commission,
+                status,
+                documents
+            } = body;
 
-            case 'PUT':
-                console.log('📝 PUT update contract');
-                const updateData = JSON.parse(event.body);
-                
-                if (!updateData.id) {
-                    return {
-                        statusCode: 400,
-                        headers,
-                        body: JSON.stringify({ error: 'ID de contrato no proporcionado' })
-                    };
-                }
-                
-                // Construir consulta según si cambia la fecha o no
-                let query;
-                let values;
-                
-                if (updateData.startDate) {
-                    const startDate = new Date(updateData.startDate);
-                    const endDate = new Date(startDate);
-                    endDate.setMonth(endDate.getMonth() + parseInt(updateData.duration));
-                    const nextIncreaseDate = calculateNextIncreaseDate(
-                        updateData.startDate,
-                        updateData.increaseFrequency || 12
-                    );
-                    
-                    // Usar fecha de referencia si existe, sino usar fecha de inicio
-                    const referenceDate = updateData.referenceDate || updateData.startDate;
-                    
-                    query = `
-                        UPDATE contracts 
-                        SET 
-                            tenant_id = $1,
-                            owner_id = $2,
-                            property_address = $3,
-                            base_amount = $4,
-                            duration = $5,
-                            start_date = $6,
-                            end_date = $7,
-                            increase_type = $8,
-                            increase_value = $9,
-                            increase_frequency = $10,
-                            next_increase_date = $11,
-                            agent_commission = $12,
-                            status = $13,
-                            reference_date = $14,
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE id = $15
-                        RETURNING *
-                    `;
-                    
-                    values = [
-                        updateData.tenantId,
-                        updateData.ownerId || null,
-                        updateData.propertyAddress || null,
-                        updateData.baseAmount,
-                        updateData.duration,
-                        updateData.startDate,
-                        endDate.toISOString().split('T')[0],
-                        updateData.increaseType || 'fixed',
-                        updateData.increaseValue || null,
-                        updateData.increaseFrequency || 12,
-                        nextIncreaseDate,
-                        updateData.agentCommission || 5,
-                        updateData.status || 'active',
-                        referenceDate,
-                        updateData.id
-                    ];
-                } else {
-                    // Usar fecha de referencia si existe, sino mantener la actual
-                    const referenceDate = updateData.referenceDate || null;
-                    
-                    query = `
-                        UPDATE contracts 
-                        SET 
-                            tenant_id = $1,
-                            owner_id = $2,
-                            property_address = $3,
-                            base_amount = $4,
-                            duration = $5,
-                            increase_type = $6,
-                            increase_value = $7,
-                            increase_frequency = $8,
-                            agent_commission = $9,
-                            status = $10,
-                            reference_date = COALESCE($11, reference_date),
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE id = $12
-                        RETURNING *
-                    `;
-                    
-                    values = [
-                        updateData.tenantId,
-                        updateData.ownerId || null,
-                        updateData.propertyAddress || null,
-                        updateData.baseAmount,
-                        updateData.duration,
-                        updateData.increaseType || 'fixed',
-                        updateData.increaseValue || null,
-                        updateData.increaseFrequency || 12,
-                        updateData.agentCommission || 5,
-                        updateData.status || 'active',
-                        referenceDate,
-                        updateData.id
-                    ];
-                }
-                
-                console.log('Ejecutando query...');
-                const updated = await sql(query, values);
-                
-                console.log('✅ Contrato actualizado:', updated[0].id);
+            if (!tenant_id || !owner_id || !start_date || !base_amount) {
                 return {
-                    statusCode: 200,
+                    statusCode: 400,
                     headers,
-                    body: JSON.stringify(updated[0])
+                    body: JSON.stringify({ error: 'Faltan campos obligatorios' })
                 };
+            }
 
-            case 'DELETE':
-                const id = event.queryStringParameters.id;
-                if (!id) {
-                    return {
-                        statusCode: 400,
-                        headers,
-                        body: JSON.stringify({ error: 'ID no proporcionado' })
-                    };
-                }
-                
-                await sql`DELETE FROM contracts WHERE id = ${id}`;
-                return {
-                    statusCode: 200,
-                    headers,
-                    body: JSON.stringify({ success: true })
-                };
+            const nextIncreaseDate = calcularProximoAumento(start_date, increase_frequency);
 
-            default:
-                return {
-                    statusCode: 405,
-                    headers,
-                    body: JSON.stringify({ error: 'Método no permitido' })
-                };
+            const nuevo = await sql`
+                INSERT INTO contracts (
+                    tenant_id,
+                    owner_id,
+                    property_id,
+                    start_date,
+                    reference_date,
+                    duration,
+                    base_amount,
+                    increase_type,
+                    increase_value,
+                    increase_frequency,
+                    agent_commission,
+                    status,
+                    next_increase_date,
+                    documents,
+                    updated_at
+                ) VALUES (
+                    ${tenant_id},
+                    ${owner_id},
+                    ${property_id || null},
+                    ${start_date}::DATE,
+                    ${reference_date ? reference_date : null}::DATE,
+                    ${parseInt(duration) || 24},
+                    ${parseFloat(base_amount)},
+                    ${increase_type || 'fixed'},
+                    ${parseFloat(increase_value) || 0},
+                    ${parseInt(increase_frequency) || 12},
+                    ${parseFloat(agent_commission) || 5},
+                    ${status || 'active'},
+                    ${nextIncreaseDate}::DATE,
+                    ${JSON.stringify(documents || [])}::jsonb,
+                    NOW()
+                )
+                RETURNING *;
+            `;
+
+            return {
+                statusCode: 201,
+                headers,
+                body: JSON.stringify(nuevo[0])
+            };
         }
+
+        // ========================================================
+        // PUT: Actualizar contrato existente
+        // ========================================================
+        if (event.httpMethod === 'PUT') {
+            const body = JSON.parse(event.body || '{}');
+            const { id } = body;
+
+            if (!id) {
+                return {
+                    statusCode: 400,
+                    headers,
+                    body: JSON.stringify({ error: 'ID de contrato requerido' })
+                };
+            }
+
+            // Si solo se actualiza el monto base (desde calcular aumento)
+            if (body.base_amount && Object.keys(body).length === 2) {
+                const actualizado = await sql`
+                    UPDATE contracts
+                    SET base_amount = ${parseFloat(body.base_amount)}, updated_at = NOW()
+                    WHERE id = ${id}
+                    RETURNING *;
+                `;
+                return {
+                    statusCode: 200,
+                    headers,
+                    body: JSON.stringify(actualizado[0])
+                };
+            }
+
+            const nextIncreaseDate = calcularProximoAumento(body.start_date, body.increase_frequency);
+
+            const actualizado = await sql`
+                UPDATE contracts
+                SET 
+                    tenant_id = ${body.tenant_id},
+                    owner_id = ${body.owner_id},
+                    property_id = ${body.property_id || null},
+                    start_date = ${body.start_date}::DATE,
+                    reference_date = ${body.reference_date ? body.reference_date : null}::DATE,
+                    duration = ${parseInt(body.duration) || 24},
+                    base_amount = ${parseFloat(body.base_amount)},
+                    increase_type = ${body.increase_type || 'fixed'},
+                    increase_value = ${parseFloat(body.increase_value) || 0},
+                    increase_frequency = ${parseInt(body.increase_frequency) || 12},
+                    agent_commission = ${parseFloat(body.agent_commission) || 5},
+                    status = ${body.status || 'active'},
+                    next_increase_date = ${nextIncreaseDate}::DATE,
+                    documents = ${JSON.stringify(body.documents || [])}::jsonb,
+                    updated_at = NOW()
+                WHERE id = ${id}
+                RETURNING *;
+            `;
+
+            if (actualizado.length === 0) {
+                return {
+                    statusCode: 404,
+                    headers,
+                    body: JSON.stringify({ error: 'Contrato no encontrado' })
+                };
+            }
+
+            return {
+                statusCode: 200,
+                headers,
+                body: JSON.stringify(actualizado[0])
+            };
+        }
+
+        // ========================================================
+        // DELETE: Eliminar contrato
+        // ========================================================
+        if (event.httpMethod === 'DELETE') {
+            const id = event.queryStringParameters?.id;
+            if (!id) {
+                return {
+                    statusCode: 400,
+                    headers,
+                    body: JSON.stringify({ error: 'ID de contrato requerido' })
+                };
+            }
+
+            await sql`DELETE FROM contracts WHERE id = ${id};`;
+
+            return {
+                statusCode: 200,
+                headers,
+                body: JSON.stringify({ success: true, message: 'Contrato eliminado correctamente' })
+            };
+        }
+
+        return {
+            statusCode: 405,
+            headers,
+            body: JSON.stringify({ error: 'Método no permitido' })
+        };
+
     } catch (error) {
-        console.error('🔴 Error en contracts:', error);
+        console.error('❌ Error en netlify/functions/contracts.js:', error);
         return {
             statusCode: 500,
             headers,
-            body: JSON.stringify({ 
-                error: 'Error interno del servidor',
-                details: error.message
-            })
+            body: JSON.stringify({ error: error.message || 'Error interno del servidor' })
         };
     }
 };

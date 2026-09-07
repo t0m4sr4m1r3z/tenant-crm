@@ -1,10 +1,12 @@
+// netlify/functions/owners.js
 const { getDb } = require('./db/config');
 
 exports.handler = async (event, context) => {
     const headers = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS'
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Content-Type': 'application/json'
     };
 
     if (event.httpMethod === 'OPTIONS') {
@@ -12,84 +14,67 @@ exports.handler = async (event, context) => {
     }
 
     try {
-        const authHeader = event.headers.authorization;
-        if (!authHeader) {
-            return {
-                statusCode: 401,
-                headers,
-                body: JSON.stringify({ error: 'No autorizado' })
-            };
-        }
-
         const sql = getDb();
-        const { id, properties } = event.queryStringParameters || {};
 
-        // ============================================
-        // GET - Obtener datos
-        // ============================================
+        // 1. Auto-migración tabla owners
+        await sql`
+            CREATE TABLE IF NOT EXISTS owners (
+                id SERIAL PRIMARY KEY,
+                dni VARCHAR(50),
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255),
+                phone VARCHAR(50),
+                address VARCHAR(255),
+                bank_account VARCHAR(100),
+                notes TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+        `;
+
+        await sql`ALTER TABLE owners ADD COLUMN IF NOT EXISTS dni VARCHAR(50);`;
+        await sql`ALTER TABLE owners ADD COLUMN IF NOT EXISTS bank_account VARCHAR(100);`;
+        await sql`ALTER TABLE owners ADD COLUMN IF NOT EXISTS notes TEXT;`;
+
+        // ========================================================
+        // GET: Listar propietarios con resumen de contratos e ingresos
+        // ========================================================
         if (event.httpMethod === 'GET') {
+            const ownerId = event.queryStringParameters?.id;
+
             // Si se piden las propiedades de un propietario específico
-            if (id && properties === 'true') {
-                const contracts = await sql`
+            if (ownerId && event.queryStringParameters?.properties === 'true') {
+                const props = await sql`
                     SELECT 
-                        c.id,
-                        c.property_address,
+                        p.*,
+                        c.id as contract_id,
                         c.base_amount,
-                        c.next_increase_date,
-                        c.status,
-                        t.id as tenant_id,
-                        t.name as tenant_name,
-                        t.email as tenant_email,
-                        t.phone as tenant_phone
-                    FROM contracts c
+                        c.status as contract_status,
+                        t.name as tenant_name
+                    FROM properties p
+                    LEFT JOIN contracts c ON p.id = c.property_id AND c.status = 'active'
                     LEFT JOIN tenants t ON c.tenant_id = t.id
-                    WHERE c.owner_id = ${id}
-                    ORDER BY c.start_date DESC
+                    WHERE p.owner_id = ${ownerId}
+                    ORDER BY p.address ASC;
                 `;
-                
-                // Obtener últimos pagos para cada contrato
-                for (const contract of contracts) {
-                    const lastPayment = await sql`
-                        SELECT paid_at, total_amount
-                        FROM payments
-                        WHERE contract_id = ${contract.id} AND status = 'paid'
-                        ORDER BY paid_at DESC
-                        LIMIT 1
-                    `;
-                    contract.last_payment_date = lastPayment[0]?.paid_at || null;
-                }
-                
-                const totalIncome = contracts.reduce((sum, c) => sum + (c.base_amount || 0), 0);
-                
                 return {
                     statusCode: 200,
                     headers,
-                    body: JSON.stringify({
-                        contracts,
-                        total_monthly_income: totalIncome
-                    })
+                    body: JSON.stringify(props)
                 };
             }
-            
-            // Obtener todos los propietarios
+
             const owners = await sql`
                 SELECT 
-                    o.id,
-                    o.name,
-                    o.email,
-                    o.phone,
-                    o.dni,
-                    o.address,
-                    o.bank_account,
-                    o.notes,
-                    COUNT(c.id) as total_contracts,
-                    COALESCE(SUM(c.base_amount), 0) as total_income
+                    o.*,
+                    COUNT(DISTINCT c.id) as contracts_count,
+                    COALESCE(SUM(CASE WHEN c.status = 'active' THEN c.base_amount ELSE 0 END), 0) as total_income
                 FROM owners o
-                LEFT JOIN contracts c ON c.owner_id = o.id AND c.status = 'active'
+                LEFT JOIN contracts c ON o.id = c.owner_id
                 GROUP BY o.id
-                ORDER BY o.name
+                ORDER BY o.name ASC;
             `;
-            
+
             return {
                 statusCode: 200,
                 headers,
@@ -97,120 +82,128 @@ exports.handler = async (event, context) => {
             };
         }
 
-        // ============================================
-        // POST - Crear nuevo propietario
-        // ============================================
+        // ========================================================
+        // POST: Crear propietario
+        // ========================================================
         if (event.httpMethod === 'POST') {
-            const newOwner = JSON.parse(event.body);
-            
-            const result = await sql`
-                INSERT INTO owners (name, email, phone, dni, address, bank_account, notes)
-                VALUES (${newOwner.name}, ${newOwner.email || null}, ${newOwner.phone || null}, 
-                        ${newOwner.dni || null}, ${newOwner.address || null}, 
-                        ${newOwner.bank_account || null}, ${newOwner.notes || null})
-                RETURNING *
+            const body = JSON.parse(event.body || '{}');
+            const { dni, name, email, phone, address, bank_account, notes } = body;
+
+            if (!name || !name.trim()) {
+                return {
+                    statusCode: 400,
+                    headers,
+                    body: JSON.stringify({ error: 'El nombre completo es obligatorio' })
+                };
+            }
+
+            const nuevo = await sql`
+                INSERT INTO owners (dni, name, email, phone, address, bank_account, notes, updated_at)
+                VALUES (
+                    ${dni ? dni.trim() : null},
+                    ${name.trim()},
+                    ${email ? email.trim() : null},
+                    ${phone ? phone.trim() : null},
+                    ${address ? address.trim() : null},
+                    ${bank_account ? bank_account.trim() : null},
+                    ${notes ? notes.trim() : null},
+                    NOW()
+                )
+                RETURNING *;
             `;
-            
+
             return {
                 statusCode: 201,
                 headers,
-                body: JSON.stringify(result[0])
+                body: JSON.stringify(nuevo[0])
             };
         }
 
-        // ============================================
-        // PUT - Actualizar propietario
-        // ============================================
+        // ========================================================
+        // PUT: Actualizar propietario
+        // ========================================================
         if (event.httpMethod === 'PUT') {
-            const updateData = JSON.parse(event.body);
-            
-            if (!updateData.id) {
+            const body = JSON.parse(event.body || '{}');
+            const { id, dni, name, email, phone, address, bank_account, notes } = body;
+
+            if (!id || !name) {
                 return {
                     statusCode: 400,
                     headers,
-                    body: JSON.stringify({ error: 'ID no proporcionado' })
+                    body: JSON.stringify({ error: 'ID y Nombre son obligatorios' })
                 };
             }
-            
-            const result = await sql`
-                UPDATE owners 
+
+            const actualizado = await sql`
+                UPDATE owners
                 SET 
-                    name = ${updateData.name},
-                    email = ${updateData.email},
-                    phone = ${updateData.phone},
-                    dni = ${updateData.dni},
-                    address = ${updateData.address},
-                    bank_account = ${updateData.bank_account},
-                    notes = ${updateData.notes},
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ${updateData.id}
-                RETURNING *
+                    dni = ${dni ? dni.trim() : null},
+                    name = ${name.trim()},
+                    email = ${email ? email.trim() : null},
+                    phone = ${phone ? phone.trim() : null},
+                    address = ${address ? address.trim() : null},
+                    bank_account = ${bank_account ? bank_account.trim() : null},
+                    notes = ${notes ? notes.trim() : null},
+                    updated_at = NOW()
+                WHERE id = ${id}
+                RETURNING *;
             `;
-            
-            if (result.length === 0) {
+
+            if (actualizado.length === 0) {
                 return {
                     statusCode: 404,
                     headers,
                     body: JSON.stringify({ error: 'Propietario no encontrado' })
                 };
             }
-            
+
             return {
                 statusCode: 200,
                 headers,
-                body: JSON.stringify(result[0])
+                body: JSON.stringify(actualizado[0])
             };
         }
 
-        // ============================================
-        // DELETE - Eliminar propietario
-        // ============================================
+        // ========================================================
+        // DELETE: Borrado seguro con verificación de contratos y propiedades
+        // ========================================================
         if (event.httpMethod === 'DELETE') {
-            const deleteId = event.queryStringParameters.id;
-            
-            if (!deleteId) {
+            const id = event.queryStringParameters?.id;
+            if (!id) {
                 return {
                     statusCode: 400,
                     headers,
-                    body: JSON.stringify({ error: 'ID no proporcionado' })
+                    body: JSON.stringify({ error: 'ID de propietario requerido' })
                 };
             }
-            
-            // Verificar si el propietario existe
-            const checkOwner = await sql`SELECT id FROM owners WHERE id = ${deleteId}`;
-            if (checkOwner.length === 0) {
-                return {
-                    statusCode: 404,
-                    headers,
-                    body: JSON.stringify({ error: 'Propietario no encontrado' })
-                };
-            }
-            
-            // Opcional: Verificar si tiene contratos asociados
-            const contracts = await sql`SELECT id FROM contracts WHERE owner_id = ${deleteId}`;
-            if (contracts.length > 0) {
+
+            // Validar contratos
+            const contratos = await sql`SELECT COUNT(*) as count FROM contracts WHERE owner_id = ${id};`;
+            const countContracts = parseInt(contratos[0].count, 10);
+
+            // Validar propiedades
+            const propiedades = await sql`SELECT COUNT(*) as count FROM properties WHERE owner_id = ${id};`;
+            const countProperties = parseInt(propiedades[0].count, 10);
+
+            if (countContracts > 0 || countProperties > 0) {
                 return {
                     statusCode: 400,
                     headers,
                     body: JSON.stringify({ 
-                        error: 'No se puede eliminar porque tiene contratos asociados',
-                        contracts_count: contracts.length
+                        error: `No puedes eliminar este propietario porque tiene ${countProperties} propiedad(es) y ${countContracts} contrato(s) vinculados. Debes reasignarlos o eliminarlos primero.` 
                     })
                 };
             }
-            
-            await sql`DELETE FROM owners WHERE id = ${deleteId}`;
-            
+
+            await sql`DELETE FROM owners WHERE id = ${id};`;
+
             return {
                 statusCode: 200,
                 headers,
-                body: JSON.stringify({ success: true, message: 'Propietario eliminado' })
+                body: JSON.stringify({ success: true, message: 'Propietario eliminado correctamente' })
             };
         }
 
-        // ============================================
-        // Método no permitido
-        // ============================================
         return {
             statusCode: 405,
             headers,
@@ -218,14 +211,11 @@ exports.handler = async (event, context) => {
         };
 
     } catch (error) {
-        console.error('Error en owners:', error);
+        console.error('❌ Error en netlify/functions/owners.js:', error);
         return {
             statusCode: 500,
             headers,
-            body: JSON.stringify({ 
-                error: 'Error interno del servidor',
-                details: error.message
-            })
+            body: JSON.stringify({ error: error.message || 'Error interno del servidor' })
         };
     }
 };

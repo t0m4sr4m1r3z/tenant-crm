@@ -2,11 +2,18 @@
   functions = "netlify/functions"
   publish = "."
 
-# Headers para PWA y caché
+[dev]
+  framework = "#static"
+  publish = "."
+  port = 8888
+
+# Headers de seguridad, PWA y caché
 [[headers]]
   for = "/*"
   [headers.values]
     Cache-Control = "public, max-age=0, must-revalidate"
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
 
 [[headers]]
   for = "/sw.js"
@@ -18,7 +25,7 @@
   [headers.values]
     Cache-Control = "public, max-age=3600"
 
-# Redirects para SPA (Single Page Application)
+# Redirecciones para rutas limpias (SPA)
 [[redirects]]
   from = "/dashboard"
   to = "/dashboard.html"
@@ -30,6 +37,16 @@
   status = 200
 
 [[redirects]]
+  from = "/owners"
+  to = "/owners.html"
+  status = 200
+
+[[redirects]]
+  from = "/properties"
+  to = "/properties.html"
+  status = 200
+
+[[redirects]]
   from = "/contracts"
   to = "/contracts.html"
   status = 200
@@ -37,6 +54,11 @@
 [[redirects]]
   from = "/payments"
   to = "/payments.html"
+  status = 200
+
+[[redirects]]
+  from = "/calendar"
+  to = "/calendar.html"
   status = 200
 
 [[redirects]]
@@ -54,16 +76,19 @@
   to = "/login.html"
   status = 200
 
-# API redirects
+[[redirects]]
+  from = "/register"
+  to = "/register.html"
+  status = 200
+
+# Redirección de API a Netlify Functions
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
 
-# Fallback para páginas no encontradas (SPA)
-# Redirige todas las rutas no encontradas a index.html,
-# que a su vez redirige a login.html.
+# Fallback para rutas inexistentes
 [[redirects]]
   from = "/*"
   to = "/index.html"
-  status = 404
+  status = 200

@@ -1,131 +1,184 @@
+// netlify/functions/tenants.js
 const { getDb } = require('./db/config');
 
 exports.handler = async (event, context) => {
     const headers = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS'
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Content-Type': 'application/json'
     };
 
-    // Preflight
     if (event.httpMethod === 'OPTIONS') {
         return { statusCode: 200, headers, body: '' };
     }
 
     try {
-        console.log('📊 Tenants function called with method:', event.httpMethod);
-        console.log('Headers:', JSON.stringify(event.headers));
+        const sql = getDb();
 
-        // Verificar autenticación
-        const authHeader = event.headers.authorization;
-        if (!authHeader) {
-            console.log('❌ No authorization header');
+        // 1. Auto-migración tabla tenants
+        await sql`
+            CREATE TABLE IF NOT EXISTS tenants (
+                id SERIAL PRIMARY KEY,
+                dni VARCHAR(50),
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255),
+                phone VARCHAR(50),
+                address VARCHAR(255),
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+        `;
+
+        // ========================================================
+        // GET: Listar inquilinos
+        // ========================================================
+        if (event.httpMethod === 'GET') {
+            const tenants = await sql`
+                SELECT 
+                    t.*,
+                    COUNT(c.id) as total_contracts
+                FROM tenants t
+                LEFT JOIN contracts c ON t.id = c.tenant_id
+                GROUP BY t.id
+                ORDER BY t.name ASC;
+            `;
+
             return {
-                statusCode: 401,
-                headers: { ...headers, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ error: 'No autorizado' })
+                statusCode: 200,
+                headers,
+                body: JSON.stringify(tenants)
             };
         }
 
-        const sql = getDb();
-        console.log('✅ Conectado a Neon DB');
+        // ========================================================
+        // POST: Crear inquilino
+        // ========================================================
+        if (event.httpMethod === 'POST') {
+            const body = JSON.parse(event.body || '{}');
+            const { dni, name, email, phone, address } = body;
 
-        switch (event.httpMethod) {
-            case 'GET':
-                console.log('📋 GET all tenants');
-                const tenants = await sql`
-                    SELECT * FROM tenants 
-                    ORDER BY created_at DESC
-                `;
-                console.log(`✅ Encontrados ${tenants.length} inquilinos`);
+            if (!name || !name.trim()) {
                 return {
-                    statusCode: 200,
-                    headers: { ...headers, 'Content-Type': 'application/json' },
-                    body: JSON.stringify(tenants)
+                    statusCode: 400,
+                    headers,
+                    body: JSON.stringify({ error: 'El nombre completo es obligatorio' })
                 };
+            }
 
-            case 'POST':
-                console.log('📝 POST new tenant');
-                const newTenant = JSON.parse(event.body);
-                console.log('Datos:', newTenant);
-                
-                const result = await sql`
-                    INSERT INTO tenants (
-                        dni, name, email, phone, address
-                    ) VALUES (
-                        ${newTenant.dni},
-                        ${newTenant.name},
-                        ${newTenant.email},
-                        ${newTenant.phone || null},
-                        ${newTenant.address || null}
-                    ) RETURNING *
-                `;
-                
-                console.log('✅ Inquilino creado:', result[0].id);
-                return {
-                    statusCode: 201,
-                    headers: { ...headers, 'Content-Type': 'application/json' },
-                    body: JSON.stringify(result[0])
-                };
+            const nuevo = await sql`
+                INSERT INTO tenants (dni, name, email, phone, address, updated_at)
+                VALUES (
+                    ${dni ? dni.trim() : null},
+                    ${name.trim()},
+                    ${email ? email.trim() : null},
+                    ${phone ? phone.trim() : null},
+                    ${address ? address.trim() : null},
+                    NOW()
+                )
+                RETURNING *;
+            `;
 
-            case 'PUT':
-                console.log('📝 PUT update tenant');
-                const updateData = JSON.parse(event.body);
-                console.log('Datos:', updateData);
-                
-                const updated = await sql`
-                    UPDATE tenants 
-                    SET 
-                        dni = ${updateData.dni},
-                        name = ${updateData.name},
-                        email = ${updateData.email},
-                        phone = ${updateData.phone},
-                        address = ${updateData.address},
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ${updateData.id}
-                    RETURNING *
-                `;
-                
-                console.log('✅ Inquilino actualizado:', updateData.id);
-                return {
-                    statusCode: 200,
-                    headers: { ...headers, 'Content-Type': 'application/json' },
-                    body: JSON.stringify(updated[0])
-                };
-
-            case 'DELETE':
-                console.log('🗑️ DELETE tenant');
-                const id = event.queryStringParameters.id;
-                console.log('ID:', id);
-                
-                await sql`DELETE FROM tenants WHERE id = ${id}`;
-                
-                console.log('✅ Inquilino eliminado:', id);
-                return {
-                    statusCode: 200,
-                    headers: { ...headers, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ success: true })
-                };
-
-            default:
-                return {
-                    statusCode: 405,
-                    headers: { ...headers, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ error: 'Método no permitido' })
-                };
+            return {
+                statusCode: 201,
+                headers,
+                body: JSON.stringify(nuevo[0])
+            };
         }
+
+        // ========================================================
+        // PUT: Actualizar inquilino
+        // ========================================================
+        if (event.httpMethod === 'PUT') {
+            const body = JSON.parse(event.body || '{}');
+            const { id, dni, name, email, phone, address } = body;
+
+            if (!id || !name) {
+                return {
+                    statusCode: 400,
+                    headers,
+                    body: JSON.stringify({ error: 'ID y Nombre son obligatorios' })
+                };
+            }
+
+            const actualizado = await sql`
+                UPDATE tenants
+                SET 
+                    dni = ${dni ? dni.trim() : null},
+                    name = ${name.trim()},
+                    email = ${email ? email.trim() : null},
+                    phone = ${phone ? phone.trim() : null},
+                    address = ${address ? address.trim() : null},
+                    updated_at = NOW()
+                WHERE id = ${id}
+                RETURNING *;
+            `;
+
+            if (actualizado.length === 0) {
+                return {
+                    statusCode: 404,
+                    headers,
+                    body: JSON.stringify({ error: 'Inquilino no encontrado' })
+                };
+            }
+
+            return {
+                statusCode: 200,
+                headers,
+                body: JSON.stringify(actualizado[0])
+            };
+        }
+
+        // ========================================================
+        // DELETE: Borrado seguro con verificación de contratos
+        // ========================================================
+        if (event.httpMethod === 'DELETE') {
+            const id = event.queryStringParameters?.id;
+            if (!id) {
+                return {
+                    statusCode: 400,
+                    headers,
+                    body: JSON.stringify({ error: 'ID de inquilino requerido' })
+                };
+            }
+
+            // Validar si tiene contratos vinculados
+            const contratos = await sql`
+                SELECT COUNT(*) as count FROM contracts WHERE tenant_id = ${id};
+            `;
+            const count = parseInt(contratos[0].count, 10);
+
+            if (count > 0) {
+                return {
+                    statusCode: 400,
+                    headers,
+                    body: JSON.stringify({ 
+                        error: `No puedes eliminar este inquilino porque tiene ${count} contrato(s) asociado(s). Elimina o reasigna sus contratos primero.` 
+                    })
+                };
+            }
+
+            await sql`DELETE FROM tenants WHERE id = ${id};`;
+
+            return {
+                statusCode: 200,
+                headers,
+                body: JSON.stringify({ success: true, message: 'Inquilino eliminado correctamente' })
+            };
+        }
+
+        return {
+            statusCode: 405,
+            headers,
+            body: JSON.stringify({ error: 'Método no permitido' })
+        };
+
     } catch (error) {
-        console.error('🔴 Error en tenants:', error);
-        console.error('Stack:', error.stack);
-        
+        console.error('❌ Error en netlify/functions/tenants.js:', error);
         return {
             statusCode: 500,
-            headers: { ...headers, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                error: 'Error interno del servidor',
-                details: error.message,
-                stack: error.stack
-            })
+            headers,
+            body: JSON.stringify({ error: error.message || 'Error interno del servidor' })
         };
     }
 };

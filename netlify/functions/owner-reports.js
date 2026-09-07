@@ -1,10 +1,12 @@
+// netlify/functions/owner-reports.js
 const { getDb } = require('./db/config');
 
 exports.handler = async (event, context) => {
     const headers = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        'Access-Control-Allow-Methods': 'GET, OPTIONS'
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Content-Type': 'application/json'
     };
 
     if (event.httpMethod === 'OPTIONS') {
@@ -12,64 +14,53 @@ exports.handler = async (event, context) => {
     }
 
     try {
-        const authHeader = event.headers.authorization;
-        if (!authHeader) {
-            return {
-                statusCode: 401,
-                headers: { ...headers, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ error: 'No autorizado' })
-            };
-        }
-
         const sql = getDb();
-        console.log('✅ Conectado a Neon DB para owner-reports');
 
-        if (event.httpMethod === 'GET') {
-            console.log('📋 GET owner reports');
-            const reports = await sql`
-                SELECT * FROM owner_report 
-                ORDER BY owner_name ASC
-            `;
-            
-            // fetch detailed properties for each owner if specified in query, or just fetch all
-            // To make it easy, we will fetch contracts details for reporting
-            const allContracts = await sql`
-                SELECT c.id, c.owner_id, c.property_address, c.base_amount, c.agent_commission, t.name as tenant_name
-                FROM contracts c
-                LEFT JOIN tenants t ON c.tenant_id = t.id
-                WHERE c.status = 'active'
-            `;
+        // Consulta de sólo lectura que agrupa contratos activos por propietario
+        const reports = await sql`
+            SELECT 
+                o.id as owner_id,
+                o.name as owner_name,
+                o.dni as owner_dni,
+                o.bank_account as owner_bank_account,
+                COUNT(DISTINCT p.id) as total_properties,
+                COUNT(DISTINCT CASE WHEN c.status = 'active' THEN c.id END) as active_contracts_count,
+                COALESCE(SUM(CASE WHEN c.status = 'active' THEN c.base_amount ELSE 0 END), 0) as gross_rent,
+                COALESCE(SUM(CASE WHEN c.status = 'active' THEN (c.base_amount * (COALESCE(c.agent_commission, 5) / 100)) ELSE 0 END), 0) as total_commission,
+                COALESCE(SUM(CASE WHEN c.status = 'active' THEN (c.base_amount * (1 - (COALESCE(c.agent_commission, 5) / 100))) ELSE 0 END), 0) as net_payable,
+                COALESCE(
+                    json_agg(
+                        json_build_object(
+                            'contract_id', c.id,
+                            'tenant_name', t.name,
+                            'property_address', p.address,
+                            'base_amount', c.base_amount,
+                            'commission_rate', c.agent_commission,
+                            'status', c.status
+                        )
+                    ) FILTER (WHERE c.id IS NOT NULL AND c.status = 'active'), 
+                    '[]'::json
+                ) as active_contracts
+            FROM owners o
+            LEFT JOIN properties p ON o.id = p.owner_id
+            LEFT JOIN contracts c ON o.id = c.owner_id
+            LEFT JOIN tenants t ON c.tenant_id = t.id
+            GROUP BY o.id, o.name, o.dni, o.bank_account
+            ORDER BY o.name ASC;
+        `;
 
-            const enhancedReports = reports.map(report => {
-                const properties = allContracts.filter(c => c.owner_id === report.owner_id);
-                return {
-                    ...report,
-                    properties
-                };
-            });
+        return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify(reports)
+        };
 
-            console.log(`✅ Reports returned for ${enhancedReports.length} owners`);
-            return {
-                statusCode: 200,
-                headers: { ...headers, 'Content-Type': 'application/json' },
-                body: JSON.stringify(enhancedReports)
-            };
-        } else {
-            return {
-                statusCode: 405,
-                headers: { ...headers, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ error: 'Método no permitido' })
-            };
-        }
     } catch (error) {
-        console.error('🔴 Error en owner-reports:', error);
+        console.error('❌ Error en netlify/functions/owner-reports.js:', error);
         return {
             statusCode: 500,
-            headers: { ...headers, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                error: 'Error interno del servidor',
-                details: error.message
-            })
+            headers,
+            body: JSON.stringify({ error: error.message || 'Error interno al generar reporte de propietarios' })
         };
     }
 };
