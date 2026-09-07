@@ -11,9 +11,7 @@
     <script src="/js/tailwind-config.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- FullCalendar CSS y JS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/main.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/main.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/locales/es.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
     <link rel="stylesheet" href="/css/style.css">
     <!-- PWA Meta Tags -->
     <link rel="icon" type="image/png" href="/icons/icon-192x192.png">
@@ -130,7 +128,7 @@
 
         <!-- Contenedor del calendario -->
         <div id="calendarContainer" class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-            <div id="calendar"></div>
+            <div id="calendar" style="min-height: 650px;"></div>
         </div>
 
         <!-- Leyenda de colores -->

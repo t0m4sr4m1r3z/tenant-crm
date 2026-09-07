@@ -1,162 +1,180 @@
-// calendar.js - Calendario de eventos (FullCalendar) con formato día/mes/año – CORREGIDO
+// js/calendar.js - Calendario de Eventos, Vencimientos y Cobranzas
 let calendar = null;
 let calendarEvents = [];
+let allPaymentsData = [];
+let allContractsData = [];
 
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('📅 Página de calendario cargada');
+    if (window.AppSidebar) AppSidebar.init();
+    if (window.Breadcrumbs) Breadcrumbs.init();
 
-    const token = sessionStorage.getItem('authToken');
-    if (!token) {
-        window.location.href = '/login.html';
-        return;
-    }
+    initCalendarControls();
+    crearModalDetalleEvento();
 
-    AppSidebar.init();
-    await cargarEventos();
-
-    document.getElementById('todayBtn').addEventListener('click', () => {
-        if (calendar) calendar.today();
-    });
-
-    document.getElementById('refreshBtn').addEventListener('click', async () => {
-        await cargarEventos();
-        UI.toast('Calendario actualizado', 'success');
-    });
-
-    document.getElementById('sendCalendarRemindersBtn').addEventListener('click', function() {
-        if (!calendarEvents || calendarEvents.length === 0) {
-            UI.toast('No hay eventos para enviar', 'warning');
-            return;
-        }
-        enviarRecordatoriosCalendario();
-    });
+    await cargarDatosCalendario();
 });
 
-async function cargarEventos() {
-    try {
-        const token = sessionStorage.getItem('authToken');
+function initCalendarControls() {
+    const todayBtn = document.getElementById('todayBtn');
+    if (todayBtn) {
+        todayBtn.addEventListener('click', () => {
+            if (calendar) calendar.today();
+        });
+    }
 
-        const [payments, contracts] = await Promise.all([
-            fetch('/.netlify/functions/payments', {
-                headers: { 'Authorization': token }
-            }).then(r => r.ok ? r.json() : []).catch(() => []),
-            fetch('/.netlify/functions/contracts', {
-                headers: { 'Authorization': token }
-            }).then(r => r.ok ? r.json() : []).catch(() => [])
-        ]);
+    const refreshBtn = document.getElementById('refreshBtn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', async () => {
+            await cargarDatosCalendario();
+            UI.toast('Calendario actualizado', 'success');
+        });
+    }
 
-        console.log('📦 Pagos cargados:', payments.length);
-        console.log('📦 Contratos cargados:', contracts.length);
-
-        calendarEvents = generarEventos(payments || [], contracts || []);
-        inicializarCalendario();
-
-    } catch (error) {
-        console.error('Error cargando eventos:', error);
-        UI.toast('Error al cargar eventos', 'error');
-        calendarEvents = [];
+    const remindersBtn = document.getElementById('sendCalendarRemindersBtn');
+    if (remindersBtn) {
+        remindersBtn.addEventListener('click', abrirResumenRecordatoriosMes);
     }
 }
 
+// ============================================
+// CARGA DE DATOS (READ-ONLY)
+// ============================================
+
+async function cargarDatosCalendario() {
+    const token = sessionStorage.getItem('authToken');
+    const headers = { 'Content-Type': 'application/json', ...(token && { 'Authorization': token }) };
+
+    const fetchSafe = (url) => fetch(url, { headers }).then(r => r.ok ? r.json() : []).catch(() => []);
+
+    try {
+        const [payments, contracts] = await Promise.all([
+            fetchSafe('/.netlify/functions/payments'),
+            fetchSafe('/.netlify/functions/contracts')
+        ]);
+
+        allPaymentsData = Array.isArray(payments) ? payments : [];
+        allContractsData = Array.isArray(contracts) ? contracts : [];
+
+        calendarEvents = generarEventos(allPaymentsData, allContractsData);
+        inicializarFullCalendar();
+
+    } catch (error) {
+        console.error('Error cargando calendario:', error);
+        UI.toast('Error al sincronizar eventos', 'error');
+    }
+}
+
+// ============================================
+// GENERACIÓN DE EVENTOS (SIN DESFASE HORARIO)
+// ============================================
+
 function generarEventos(payments, contracts) {
     const events = [];
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
 
-    // 1. Pagos pendientes
+    const calcularDiasRestantes = (dateStr) => {
+        if (!dateStr) return null;
+        const [y, m, d] = dateStr.slice(0, 10).split('-').map(Number);
+        const target = new Date(y, m - 1, d);
+        return Math.round((target - hoy) / (1000 * 60 * 60 * 24));
+    };
+
+    // 1. Pagos pendientes y vencidos
     payments.forEach(p => {
-        if (p.status === 'pending' && p.due_date) {
-            const dueDate = new Date(p.due_date);
-            const diffDays = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
-            const isOverdue = diffDays < 0;
+        if (p.status !== 'paid' && p.due_date) {
+            const fechaLimpia = p.due_date.slice(0, 10); // Formato exacto YYYY-MM-DD
+            const dias = calcularDiasRestantes(fechaLimpia);
+            const esVencido = dias < 0 || p.status === 'overdue';
 
-            let color = '#f59e0b';
-            let titlePrefix = '⏳ Pago próximo';
-
-            if (isOverdue) {
-                color = '#ef4444';
-                titlePrefix = '⚠️ Pago vencido';
-            } else if (diffDays <= 7) {
-                color = '#f59e0b';
-                titlePrefix = '⏳ Pago próximo';
-            } else {
-                return;
-            }
-
-            const tenantName = p.tenant_name || 'Contrato #' + p.contract_id;
-            const amount = parseFloat(p.total_amount || p.amount || 0);
+            const color = esVencido ? '#ef4444' : '#f59e0b';
+            const etiqueta = esVencido ? '⚠️ Vencido' : '⏳ Por vencer';
+            const inquilino = p.tenant_name || 'Inquilino';
+            const monto = parseFloat(p.amount) || 0;
 
             events.push({
-                id: `payment-${p.id}`,
-                title: `${titlePrefix}: ${tenantName} - ${AppUtils.formatCurrency(amount)}`,
-                start: p.due_date,
+                id: `pay-${p.id}`,
+                title: `${etiqueta}: ${inquilino} - ${AppUtils.formatCurrency(monto)}`,
+                start: fechaLimpia,
                 allDay: true,
                 backgroundColor: color,
                 borderColor: color,
                 textColor: '#ffffff',
                 extendedProps: {
-                    type: 'payment',
-                    status: isOverdue ? 'overdue' : 'upcoming',
-                    contract_id: p.contract_id,
-                    tenant: tenantName,
-                    amount: amount,
-                    due_date: p.due_date
+                    tipo: 'pago',
+                    subtipo: esVencido ? 'vencido' : 'proximo',
+                    inquilino,
+                    telefono: p.tenant_phone,
+                    monto,
+                    concepto: p.concept || 'Alquiler',
+                    propiedad: p.property_address || 'Inmueble',
+                    fechaVencimiento: fechaLimpia,
+                    contratoId: p.contract_id
                 }
             });
         }
     });
 
-    // 2. Contratos por vencer (30 días)
+    // 2. Aumentos programados (próximos 90 días)
     contracts.forEach(c => {
-        if (c.status === 'active' && c.end_date) {
-            const endDate = new Date(c.end_date);
-            const diffDays = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
-            if (diffDays > 0 && diffDays <= 30) {
-                const tenantName = c.tenant_name || 'Contrato #' + c.id;
+        if (c.status === 'active' && c.next_increase_date) {
+            const fechaAumento = c.next_increase_date.slice(0, 10);
+            const dias = calcularDiasRestantes(fechaAumento);
+
+            if (dias >= -15 && dias <= 90) {
+                const monto = parseFloat(c.base_amount) || 0;
+                const pct = parseFloat(c.increase_value) || 0;
+                const nuevoMonto = monto * (1 + (pct / 100));
+                const inquilino = c.tenant_name || 'Inquilino';
+
                 events.push({
-                    id: `contract-end-${c.id}`,
-                    title: `📄 Contrato vence: ${tenantName}`,
-                    start: c.end_date,
+                    id: `inc-${c.id}`,
+                    title: `📈 Aumento: ${inquilino} (${(c.increase_type || 'Fijo').toUpperCase()})`,
+                    start: fechaAumento,
                     allDay: true,
-                    backgroundColor: '#3b82f6',
-                    borderColor: '#3b82f6',
+                    backgroundColor: '#10b981',
+                    borderColor: '#10b981',
                     textColor: '#ffffff',
                     extendedProps: {
-                        type: 'contract_end',
-                        contract_id: c.id,
-                        tenant: tenantName,
-                        days_left: diffDays
+                        tipo: 'aumento',
+                        inquilino,
+                        telefono: c.tenant_phone,
+                        montoActual: monto,
+                        nuevoMontoEstimado: nuevoMonto,
+                        porcentaje: pct,
+                        tipoAumento: c.increase_type || 'Fijo',
+                        propiedad: c.property_address || 'Inmueble',
+                        fecha: fechaAumento,
+                        contratoId: c.id
                     }
                 });
             }
         }
     });
 
-    // 3. Próximos aumentos (60 días)
+    // 3. Contratos por finalizar
     contracts.forEach(c => {
-        if (c.next_increase_date) {
-            const increaseDate = new Date(c.next_increase_date);
-            const diffDays = Math.ceil((increaseDate - today) / (1000 * 60 * 60 * 24));
-            if (diffDays > 0 && diffDays <= 60) {
-                const tenantName = c.tenant_name || 'Contrato #' + c.id;
-                const amount = parseFloat(c.base_amount || 0);
-                const newAmount = amount * (1 + (parseFloat(c.increase_value || 0) / 100));
+        if (c.status === 'active' && c.end_date) {
+            const fechaFin = c.end_date.slice(0, 10);
+            const dias = calcularDiasRestantes(fechaFin);
+
+            if (dias >= 0 && dias <= 60) {
                 events.push({
-                    id: `increase-${c.id}`,
-                    title: `📈 Aumento: ${tenantName} → ${AppUtils.formatCurrency(newAmount)}`,
-                    start: c.next_increase_date,
+                    id: `end-${c.id}`,
+                    title: `📄 Vence contrato: ${c.tenant_name || 'Inquilino'}`,
+                    start: fechaFin,
                     allDay: true,
-                    backgroundColor: '#22c55e',
-                    borderColor: '#22c55e',
+                    backgroundColor: '#3b82f6',
+                    borderColor: '#3b82f6',
                     textColor: '#ffffff',
                     extendedProps: {
-                        type: 'increase',
-                        contract_id: c.id,
-                        tenant: tenantName,
-                        current_amount: amount,
-                        new_amount: newAmount,
-                        percentage: c.increase_value || 0,
-                        days_left: diffDays
+                        tipo: 'fin_contrato',
+                        inquilino: c.tenant_name || 'Inquilino',
+                        telefono: c.tenant_phone,
+                        propiedad: c.property_address || 'Inmueble',
+                        fechaFin,
+                        diasRestantes: dias,
+                        contratoId: c.id
                     }
                 });
             }
@@ -165,269 +183,198 @@ function generarEventos(payments, contracts) {
 
     return events;
 }
-function inicializarCalendario() {
+
+// ============================================
+// INICIALIZACIÓN DE FULLCALENDAR
+// ============================================
+
+function inicializarFullCalendar() {
     const calendarEl = document.getElementById('calendar');
-    if (!calendarEl) return;
+    if (!calendarEl || typeof FullCalendar === 'undefined') return;
 
     if (calendar) {
         calendar.destroy();
         calendar = null;
     }
 
-    // ===== CONFIGURACIÓN CON FORMATO DÍA/MES/AÑO =====
     calendar = new FullCalendar.Calendar(calendarEl, {
-        // ===== IDIOMA ESPAÑOL =====
         locale: 'es',
         initialView: 'dayGridMonth',
-        
-        // ===== BARRA DE HERRAMIENTAS =====
         headerToolbar: {
             left: 'prev,next today',
             center: 'title',
-            right: 'dayGridMonth,dayGridWeek,listWeek'
+            right: 'dayGridMonth,dayGridWeek,listMonth'
         },
-        
-        // ===== TEXTO DE LOS BOTONES EN ESPAÑOL =====
         buttonText: {
             today: 'Hoy',
             month: 'Mes',
             week: 'Semana',
-            list: 'Lista'
+            list: 'Agenda'
         },
-        
-        // ===== FORMATO DE FECHAS DÍA/MES/AÑO =====
-        titleFormat: { year: 'numeric', month: 'long' }, // "Agosto 2025"
-        
-        // ===== CONFIGURACIÓN POR VISTA =====
-        views: {
-            dayGridMonth: {
-                titleFormat: { year: 'numeric', month: 'long' } // "Agosto 2025"
-            },
-            dayGridWeek: {
-                titleFormat: { year: 'numeric', month: 'long', day: 'numeric' } // "Agosto 2025"
-            },
-            listWeek: {
-                titleFormat: { year: 'numeric', month: 'long', day: 'numeric' } // "Agosto 2025"
-            }
-        },
-        
-        // ===== MOSTRAR DÍA SIN FORMATO ADICIONAL =====
-        dayCellContent: function(info) {
-            return info.date.getDate();
-        },
-        
-        // ===== EVENTOS DEL CALENDARIO =====
+        titleFormat: { year: 'numeric', month: 'long' },
         events: calendarEvents,
-        
-        // ===== TOOLTIP AL PASAR EL MOUSE =====
-        eventDidMount: function(info) {
-            const tooltip = document.createElement('div');
-            tooltip.className = 'calendar-tooltip absolute bg-gray-900 text-white text-xs rounded-lg p-2 z-50 shadow-lg max-w-xs pointer-events-none hidden';
-            tooltip.id = `tooltip-${info.event.id}`;
-
-            const props = info.event.extendedProps;
-            let tooltipText = info.event.title;
-
-            if (props.type === 'payment') {
-                const statusText = props.status === 'overdue' ? '⚠️ Vencido' : '⏳ Próximo';
-                tooltipText = `
-                    <strong>${statusText}</strong><br>
-                    Inquilino: ${props.tenant}<br>
-                    Monto: ${AppUtils.formatCurrency(props.amount)}<br>
-                    Vence: ${AppUtils.formatDate(props.due_date)}
-                `;
-            } else if (props.type === 'contract_end') {
-                tooltipText = `
-                    <strong>📄 Contrato por vencer</strong><br>
-                    Inquilino: ${props.tenant}<br>
-                    Días restantes: ${props.days_left}
-                `;
-            } else if (props.type === 'increase') {
-                tooltipText = `
-                    <strong>📈 Aumento programado</strong><br>
-                    Inquilino: ${props.tenant}<br>
-                    Actual: ${AppUtils.formatCurrency(props.current_amount)}<br>
-                    Nuevo: ${AppUtils.formatCurrency(props.new_amount)}<br>
-                    Incremento: ${props.percentage}%
-                `;
-            }
-
-            tooltip.innerHTML = tooltipText;
-            document.body.appendChild(tooltip);
-
-            info.el.addEventListener('mouseenter', function(e) {
-                const rect = info.el.getBoundingClientRect();
-                const tooltipEl = document.getElementById(`tooltip-${info.event.id}`);
-                if (tooltipEl) {
-                    tooltipEl.classList.remove('hidden');
-                    tooltipEl.style.top = (rect.top - 60) + 'px';
-                    tooltipEl.style.left = (rect.left + rect.width / 2 - 100) + 'px';
-                }
-            });
-
-            info.el.addEventListener('mouseleave', function() {
-                const tooltipEl = document.getElementById(`tooltip-${info.event.id}`);
-                if (tooltipEl) tooltipEl.classList.add('hidden');
-            });
-
-            info.el.addEventListener('click', function() {
-                const props = info.event.extendedProps;
-                if (props.type === 'payment') {
-                    window.location.href = '/payments.html';
-                } else if (props.type === 'contract_end' || props.type === 'increase') {
-                    window.location.href = '/contracts.html';
-                }
-            });
-        },
-        
-        // ===== FORMATO DE HORA =====
-        eventTimeFormat: {
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false
-        },
-        
-        // ===== TAMAÑO Y ASPECTO =====
         height: 'auto',
-        contentHeight: 'auto',
-        aspectRatio: 1.5,
-        
-        // ===== AL INICIAR LA VISTA =====
-        viewDidMount: function() {
-            aplicarModoOscuroCalendario();
+        dayMaxEvents: 3,
+
+        // Click en evento: Abre el modal de detalle con opciones
+        eventClick: function(info) {
+            info.jsEvent.preventDefault();
+            mostrarDetalleEvento(info.event.extendedProps);
         }
     });
 
-    // ===== RENDERIZAR CALENDARIO =====
     calendar.render();
-
-    // ===== OBSERVADOR PARA MODO OSCURO =====
-    const observer = new MutationObserver(() => {
-        aplicarModoOscuroCalendario();
-    });
-    observer.observe(document.body, {
-        attributes: true,
-        attributeFilter: ['class']
-    });
-
-    console.log('✅ Calendario inicializado correctamente en español con formato día/mes/año');
-}
-function aplicarModoOscuroCalendario() {
-    const isDark = document.body.classList.contains('dark');
-    const calendarEl = document.getElementById('calendar');
-    if (!calendarEl) return;
-
-    if (isDark) {
-        calendarEl.style.setProperty('--fc-border-color', '#334155');
-        calendarEl.style.setProperty('--fc-neutral-bg-color', '#1e293b');
-        calendarEl.style.setProperty('--fc-page-bg-color', '#1e293b');
-        calendarEl.style.setProperty('--fc-button-bg-color', '#334155');
-        calendarEl.style.setProperty('--fc-button-border-color', '#475569');
-        calendarEl.style.setProperty('--fc-button-hover-bg-color', '#475569');
-        calendarEl.style.setProperty('--fc-button-text-color', '#e2e8f0');
-        calendarEl.style.setProperty('--fc-today-bg-color', 'rgba(99, 102, 241, 0.2)');
-        calendarEl.style.setProperty('--fc-event-bg-color', '#4f46e5');
-        calendarEl.style.setProperty('--fc-event-border-color', '#4f46e5');
-        calendarEl.style.setProperty('--fc-event-text-color', '#ffffff');
-    } else {
-        calendarEl.style.setProperty('--fc-border-color', '#e5e7eb');
-        calendarEl.style.setProperty('--fc-neutral-bg-color', '#f9fafb');
-        calendarEl.style.setProperty('--fc-page-bg-color', '#ffffff');
-        calendarEl.style.setProperty('--fc-button-bg-color', '#4f46e5');
-        calendarEl.style.setProperty('--fc-button-border-color', '#4f46e5');
-        calendarEl.style.setProperty('--fc-button-hover-bg-color', '#4338ca');
-        calendarEl.style.setProperty('--fc-button-text-color', '#ffffff');
-        calendarEl.style.setProperty('--fc-today-bg-color', 'rgba(99, 102, 241, 0.1)');
-        calendarEl.style.setProperty('--fc-event-bg-color', '#4f46e5');
-        calendarEl.style.setProperty('--fc-event-border-color', '#4f46e5');
-        calendarEl.style.setProperty('--fc-event-text-color', '#ffffff');
-    }
-
-    if (calendar) {
-        calendar.updateSize();
-    }
 }
 
 // ============================================
-// RECORDATORIOS DEL CALENDARIO
+// MODAL DE DETALLE Y ACCIONES DIRECTAS
 // ============================================
 
-function enviarRecordatoriosCalendario() {
-    const now = new Date();
-    const month = now.getMonth();
-    const year = now.getFullYear();
-    const monthName = now.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+function crearModalDetalleEvento() {
+    if (document.getElementById('calendarEventModal')) return;
 
-    if (!calendarEvents || calendarEvents.length === 0) {
-        UI.toast('No hay eventos en el calendario', 'info');
+    const modal = document.createElement('div');
+    modal.id = 'calendarEventModal';
+    modal.className = 'fixed inset-0 z-50 hidden flex items-center justify-center p-4';
+    modal.innerHTML = `
+        <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm" onclick="cerrarDetalleEvento()"></div>
+        <div class="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-md w-full p-6 z-10 border border-slate-100 dark:border-slate-800 animate-fade-in">
+            <div class="flex justify-between items-start mb-4">
+                <h3 id="calModalTitle" class="text-lg font-bold text-slate-800 dark:text-white"></h3>
+                <button onclick="cerrarDetalleEvento()" class="text-slate-400 hover:text-slate-600"><i class="fas fa-times text-lg"></i></button>
+            </div>
+            <div id="calModalBody" class="space-y-3 text-sm text-slate-600 dark:text-slate-300"></div>
+            <div id="calModalActions" class="mt-6 flex flex-wrap gap-2 justify-end pt-3 border-t border-slate-100 dark:border-slate-800"></div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+function mostrarDetalleEvento(props) {
+    const modal = document.getElementById('calendarEventModal');
+    const title = document.getElementById('calModalTitle');
+    const body = document.getElementById('calModalBody');
+    const actions = document.getElementById('calModalActions');
+
+    if (!modal) return;
+
+    if (props.tipo === 'pago') {
+        const esVencido = props.subtipo === 'vencido';
+        title.innerHTML = `<span class="${esVencido ? 'text-red-600' : 'text-amber-600'}">${esVencido ? '⚠️ Pago Vencido' : '⏳ Pago Próximo'}</span>`;
+        body.innerHTML = `
+            <p><strong>Inquilino:</strong> ${AppUtils.escapeHtml(props.inquilino)}</p>
+            <p><strong>Inmueble:</strong> ${AppUtils.escapeHtml(props.propiedad)}</p>
+            <p><strong>Concepto:</strong> ${AppUtils.escapeHtml(props.concepto)}</p>
+            <p><strong>Importe:</strong> <span class="font-bold text-base text-slate-900 dark:text-white">${AppUtils.formatCurrency(props.monto)}</span></p>
+            <p><strong>Vencimiento:</strong> ${AppUtils.formatDate(props.fechaVencimiento)}</p>
+        `;
+
+        actions.innerHTML = `
+            <button onclick="cerrarDetalleEvento()" class="px-3 py-1.5 border rounded-lg hover:bg-slate-50 text-xs">Cerrar</button>
+            <a href="/payments.html" class="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-xs">Ir a Cobranzas</a>
+            ${props.telefono ? `
+            <button onclick="enviarWhatsAppRecordatorioDirecto('${props.telefono}', '${props.inquilino}', '${props.concepto}', ${props.monto}, '${props.fechaVencimiento}')" class="px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-xs flex items-center gap-1">
+                <i class="fab fa-whatsapp"></i> Avisar por WhatsApp
+            </button>` : ''}
+        `;
+    } else if (props.tipo === 'aumento') {
+        title.innerHTML = `<span class="text-emerald-600">📈 Aumento Programado</span>`;
+        body.innerHTML = `
+            <p><strong>Inquilino:</strong> ${AppUtils.escapeHtml(props.inquilino)}</p>
+            <p><strong>Inmueble:</strong> ${AppUtils.escapeHtml(props.propiedad)}</p>
+            <p><strong>Renta Actual:</strong> ${AppUtils.formatCurrency(props.montoActual)}</p>
+            <p><strong>Tipo de Índice:</strong> ${props.tipoAumento.toUpperCase()} (+${props.porcentaje}%)</p>
+            <p><strong>Fecha de Aplicación:</strong> ${AppUtils.formatDate(props.fecha)}</p>
+        `;
+
+        actions.innerHTML = `
+            <button onclick="cerrarDetalleEvento()" class="px-3 py-1.5 border rounded-lg hover:bg-slate-50 text-xs">Cerrar</button>
+            <a href="/contracts.html" class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-xs">Ver en Contratos</a>
+        `;
+    } else {
+        title.innerHTML = `<span class="text-blue-600">📄 Finalización de Contrato</span>`;
+        body.innerHTML = `
+            <p><strong>Inquilino:</strong> ${AppUtils.escapeHtml(props.inquilino)}</p>
+            <p><strong>Inmueble:</strong> ${AppUtils.escapeHtml(props.propiedad)}</p>
+            <p><strong>Fecha de Vencimiento:</strong> ${AppUtils.formatDate(props.fechaFin)}</p>
+            <p><strong>Días Restantes:</strong> ${props.diasRestantes} días</p>
+        `;
+
+        actions.innerHTML = `
+            <button onclick="cerrarDetalleEvento()" class="px-3 py-1.5 border rounded-lg hover:bg-slate-50 text-xs">Cerrar</button>
+            <a href="/contracts.html" class="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-xs">Gestionar Renovación</a>
+        `;
+    }
+
+    modal.classList.remove('hidden');
+}
+
+function cerrarDetalleEvento() {
+    const modal = document.getElementById('calendarEventModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+// ============================================
+// WHATSAPP DESDE EL CALENDARIO
+// ============================================
+
+function enviarWhatsAppRecordatorioDirecto(telefono, inquilino, concepto, monto, fecha) {
+    let clean = telefono.replace(/\D/g, '');
+    if (clean.length === 10) clean = '549' + clean;
+    else if (clean.startsWith('54') && !clean.startsWith('549')) clean = '549' + clean.substring(2);
+
+    const msg = 
+`Hola ${inquilino}, te escribimos desde la administración para recordarte el vencimiento de *${concepto}* por un importe de *${AppUtils.formatCurrency(monto)}* el día *${AppUtils.formatDate(fecha)}*.
+Por favor, envíanos el comprobante una vez realizada la transferencia. ¡Muchas gracias!`;
+
+    window.open(`https://api.whatsapp.com/send?phone=${clean}&text=${encodeURIComponent(msg)}`, '_blank');
+}
+
+// ============================================
+// RESUMEN MENSUAL SEGURO (SIN RUPTURA DE URL)
+// ============================================
+
+function abrirResumenRecordatoriosMes() {
+    const hoy = new Date();
+    const mesActualStr = hoy.toISOString().slice(0, 7);
+    const nombreMes = hoy.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+
+    const eventosDelMes = calendarEvents.filter(e => e.start.startsWith(mesActualStr));
+
+    if (eventosDelMes.length === 0) {
+        UI.toast('No hay eventos registrados para el mes en curso.', 'info');
         return;
     }
 
-    const eventosMes = calendarEvents.filter(event => {
-        const eventDate = new Date(event.start);
-        return eventDate.getMonth() === month && eventDate.getFullYear() === year;
+    let pagosVencidos = 0;
+    let pagosProximos = 0;
+    let aumentos = 0;
+
+    eventosDelMes.forEach(e => {
+        if (e.extendedProps?.tipo === 'pago') {
+            if (e.extendedProps.subtipo === 'vencido') pagosVencidos++;
+            else pagosProximos++;
+        } else if (e.extendedProps?.tipo === 'aumento') {
+            aumentos++;
+        }
     });
 
-    if (eventosMes.length === 0) {
-        UI.toast('No hay eventos en el mes actual', 'info');
-        return;
+    const resumenTexto = 
+`📅 *RESUMEN DE ALQUILERES - ${nombreMes.toUpperCase()}*
+---------------------------------------------
+⚠️ Pagos Vencidos: ${pagosVencidos}
+⏳ Pagos Próximos: ${pagosProximos}
+📈 Aumentos Programados: ${aumentos}
+Total de Eventos: ${eventosDelMes.length}
+---------------------------------------------
+_Tenant CRM - Panel de Notificaciones_`;
+
+    // Modal de confirmación para compartir
+    if (confirm(`Resumen del mes (${nombreMes}):\n\n- ${pagosVencidos} pagos vencidos\n- ${pagosProximos} pagos por vencer\n- ${aumentos} aumentos programados\n\n¿Deseas abrir WhatsApp para compartir este reporte interno?`)) {
+        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(resumenTexto)}`, '_blank');
     }
-
-    let body = `📅 RESUMEN DE EVENTOS - ${monthName.toUpperCase()}\n\n`;
-    body += `========================================\n`;
-    body += `Total de eventos: ${eventosMes.length}\n\n`;
-
-    const payments = eventosMes.filter(e => e.extendedProps?.type === 'payment');
-    const contractEnds = eventosMes.filter(e => e.extendedProps?.type === 'contract_end');
-    const increases = eventosMes.filter(e => e.extendedProps?.type === 'increase');
-
-    if (payments.length > 0) {
-        body += `💳 PAGOS (${payments.length}):\n`;
-        payments.forEach(e => {
-            const date = new Date(e.start).toLocaleDateString();
-            const props = e.extendedProps;
-            body += `   - ${date}: ${props.tenant} - ${AppUtils.formatCurrency(props.amount)} (${props.status === 'overdue' ? 'VENCIDO' : 'Próximo'})\n`;
-        });
-        body += `\n`;
-    }
-
-    if (contractEnds.length > 0) {
-        body += `📄 CONTRATOS POR VENCER (${contractEnds.length}):\n`;
-        contractEnds.forEach(e => {
-            const date = new Date(e.start).toLocaleDateString();
-            const props = e.extendedProps;
-            body += `   - ${date}: ${props.tenant} (${props.days_left} días restantes)\n`;
-        });
-        body += `\n`;
-    }
-
-    if (increases.length > 0) {
-        body += `📈 AUMENTOS PROGRAMADOS (${increases.length}):\n`;
-        increases.forEach(e => {
-            const date = new Date(e.start).toLocaleDateString();
-            const props = e.extendedProps;
-            body += `   - ${date}: ${props.tenant} - ${AppUtils.formatCurrency(props.current_amount)} → ${AppUtils.formatCurrency(props.new_amount)} (${props.percentage}%)\n`;
-        });
-        body += `\n`;
-    }
-
-    body += `========================================\n`;
-    body += `📧 Este es un resumen del calendario de Tenant CRM.\n`;
-    body += `💡 Para más detalles, ingresa al sistema.\n`;
-
-    const subject = `📅 Resumen de eventos - ${monthName}`;
-    const encodedSubject = encodeURIComponent(subject);
-    const encodedBody = encodeURIComponent(body);
-
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    let mailtoLink;
-
-    if (isMobile) {
-        mailtoLink = `intent://mailto:?subject=${encodedSubject}&body=${encodedBody}#Intent;scheme=mailto;package=com.google.android.gm;end`;
-    } else {
-        mailtoLink = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodedSubject}&body=${encodedBody}`;
-    }
-
-    window.open(mailtoLink, '_blank');
-    UI.toast('Abriendo correo con el resumen del mes', 'success');
 }
+
+// Exponer funciones globales
+window.cerrarDetalleEvento = cerrarDetalleEvento;
+window.enviarWhatsAppRecordatorioDirecto = enviarWhatsAppRecordatorioDirecto;
