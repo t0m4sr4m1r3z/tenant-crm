@@ -1,4 +1,4 @@
-// netlify/functions/payments.js
+// netlify/functions/payments.js - Gestión Blindada de Pagos (Seguro para datos existentes)
 const { getDb } = require('./db/config');
 
 exports.handler = async (event, context) => {
@@ -16,59 +16,59 @@ exports.handler = async (event, context) => {
     try {
         const sql = getDb();
 
-        // 1. Auto-migración de la tabla payments
-        await sql`
-            CREATE TABLE IF NOT EXISTS payments (
-                id SERIAL PRIMARY KEY,
-                contract_id INTEGER NOT NULL,
-                concept VARCHAR(50) DEFAULT 'Alquiler',
-                amount NUMERIC(12, 2) NOT NULL,
-                commission NUMERIC(12, 2) DEFAULT 0,
-                due_date DATE NOT NULL,
-                payment_date DATE,
-                payment_method VARCHAR(50) DEFAULT 'transferencia',
-                reference VARCHAR(100),
-                notes TEXT,
-                status VARCHAR(20) DEFAULT 'pending', -- 'pending', 'paid', 'overdue'
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-            );
-        `;
+        // 1. Asegurar la existencia de todas las tablas relacionadas para que el JOIN nunca falle
+        await sql`CREATE TABLE IF NOT EXISTS tenants (id SERIAL PRIMARY KEY, name VARCHAR(255));`;
+        await sql`CREATE TABLE IF NOT EXISTS owners (id SERIAL PRIMARY KEY, name VARCHAR(255));`;
+        await sql`CREATE TABLE IF NOT EXISTS properties (id SERIAL PRIMARY KEY, address VARCHAR(255));`;
+        await sql`CREATE TABLE IF NOT EXISTS contracts (id SERIAL PRIMARY KEY, tenant_id INTEGER, owner_id INTEGER, property_id INTEGER);`;
+        await sql`CREATE TABLE IF NOT EXISTS payments (id SERIAL PRIMARY KEY, contract_id INTEGER);`;
 
-        // Columnas opcionales añadidas dinámicamente
+        // 2. Asegurar columnas en tablas foráneas sin alterar datos existentes
+        await sql`ALTER TABLE contracts ADD COLUMN IF NOT EXISTS property_id INTEGER;`;
+        await sql`ALTER TABLE contracts ADD COLUMN IF NOT EXISTS tenant_id INTEGER;`;
+        await sql`ALTER TABLE contracts ADD COLUMN IF NOT EXISTS owner_id INTEGER;`;
+        await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS phone VARCHAR(50);`;
+        await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS dni VARCHAR(50);`;
+
+        // 3. Asegurar todas las columnas en la tabla payments
+        await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS contract_id INTEGER;`;
+        await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS concept VARCHAR(50) DEFAULT 'Alquiler';`;
+        await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS amount NUMERIC(12, 2) DEFAULT 0;`;
+        await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS total_amount NUMERIC(12, 2) DEFAULT 0;`;
         await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS commission NUMERIC(12, 2) DEFAULT 0;`;
+        await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS due_date DATE;`;
+        await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_date DATE;`;
+        await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS date DATE;`;
         await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'transferencia';`;
         await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS reference VARCHAR(100);`;
         await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS notes TEXT;`;
+        await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'pending';`;
 
         // ========================================================
-        // GET: Obtener todos los pagos con relaciones
+        // GET: Consulta ultra-segura (evita errores de tipo en PostgreSQL)
         // ========================================================
         if (event.httpMethod === 'GET') {
             const hoyStr = new Date().toISOString().split('T')[0];
 
-            const payments = await sql`
+            const rows = await sql`
                 SELECT 
                     p.id,
                     p.contract_id,
-                    p.concept,
-                    p.amount,
-                    p.commission,
-                    TO_CHAR(p.due_date, 'YYYY-MM-DD') as due_date,
-                    TO_CHAR(p.payment_date, 'YYYY-MM-DD') as payment_date,
-                    p.payment_method,
+                    COALESCE(p.concept, 'Alquiler') as concept,
+                    COALESCE(p.amount::TEXT, p.total_amount::TEXT, '0') as amount_raw,
+                    COALESCE(p.commission::TEXT, '0') as commission_raw,
+                    p.due_date::TEXT as due_date,
+                    COALESCE(p.payment_date::TEXT, p.date::TEXT, NULL) as payment_date,
+                    COALESCE(p.payment_method, 'transferencia') as payment_method,
                     p.reference,
                     p.notes,
-                    CASE 
-                        WHEN p.status = 'paid' THEN 'paid'
-                        WHEN p.due_date < ${hoyStr}::DATE THEN 'overdue'
-                        ELSE 'pending'
-                    END as status,
+                    COALESCE(p.status, 'pending') as raw_status,
                     c.tenant_id,
                     c.owner_id,
                     c.property_id,
                     t.name as tenant_name,
                     t.dni as tenant_dni,
+                    t.phone as tenant_phone,
                     o.name as owner_name,
                     prop.address as property_address
                 FROM payments p
@@ -76,8 +76,44 @@ exports.handler = async (event, context) => {
                 LEFT JOIN tenants t ON c.tenant_id = t.id
                 LEFT JOIN owners o ON c.owner_id = o.id
                 LEFT JOIN properties prop ON c.property_id = prop.id
-                ORDER BY p.due_date DESC, p.id DESC;
+                ORDER BY p.id DESC;
             `;
+
+            // Procesamiento en JavaScript para cálculo de morosidad y formateo seguro
+            const payments = rows.map(p => {
+                let status = p.raw_status;
+                const dueDateStr = p.due_date ? p.due_date.slice(0, 10) : null;
+
+                if (status === 'paid') {
+                    status = 'paid';
+                } else if (dueDateStr && dueDateStr < hoyStr) {
+                    status = 'overdue';
+                } else {
+                    status = 'pending';
+                }
+
+                return {
+                    id: p.id,
+                    contract_id: p.contract_id,
+                    concept: p.concept,
+                    amount: parseFloat(p.amount_raw) || 0,
+                    commission: parseFloat(p.commission_raw) || 0,
+                    due_date: dueDateStr,
+                    payment_date: p.payment_date ? p.payment_date.slice(0, 10) : null,
+                    payment_method: p.payment_method,
+                    reference: p.reference,
+                    notes: p.notes,
+                    status: status,
+                    tenant_id: p.tenant_id,
+                    owner_id: p.owner_id,
+                    property_id: p.property_id,
+                    tenant_name: p.tenant_name,
+                    tenant_dni: p.tenant_dni,
+                    tenant_phone: p.tenant_phone,
+                    owner_name: p.owner_name,
+                    property_address: p.property_address
+                };
+            });
 
             return {
                 statusCode: 200,
@@ -104,11 +140,11 @@ exports.handler = async (event, context) => {
                 status
             } = body;
 
-            if (!contract_id || !amount || !due_date) {
+            if (!contract_id || amount === undefined || !due_date) {
                 return {
                     statusCode: 400,
                     headers,
-                    body: JSON.stringify({ error: 'Contrato, Monto y Fecha de Vencimiento son obligatorios' })
+                    body: JSON.stringify({ error: 'Contrato, Monto y Fecha de Vencimiento son requeridos' })
                 };
             }
 
@@ -151,21 +187,17 @@ exports.handler = async (event, context) => {
         }
 
         // ========================================================
-        // PUT: Actualizar pago o marcar como cobrado
+        // PUT: Actualizar pago o cobro rápido
         // ========================================================
         if (event.httpMethod === 'PUT') {
             const body = JSON.parse(event.body || '{}');
             const { id } = body;
 
             if (!id) {
-                return {
-                    statusCode: 400,
-                    headers,
-                    body: JSON.stringify({ error: 'ID de pago requerido' })
-                };
+                return { statusCode: 400, headers, body: JSON.stringify({ error: 'ID de pago requerido' }) };
             }
 
-            // Si solo se pasa para marcar como pagado en 1 clic
+            // Marcar como cobrado en 1 clic
             if (body.status === 'paid' && Object.keys(body).length <= 3) {
                 const fechaCobro = body.payment_date || new Date().toISOString().split('T')[0];
                 const actualizado = await sql`
@@ -177,12 +209,7 @@ exports.handler = async (event, context) => {
                     WHERE id = ${id}
                     RETURNING *;
                 `;
-
-                return {
-                    statusCode: 200,
-                    headers,
-                    body: JSON.stringify(actualizado[0])
-                };
+                return { statusCode: 200, headers, body: JSON.stringify(actualizado[0]) };
             }
 
             const actualizado = await sql`
@@ -204,18 +231,10 @@ exports.handler = async (event, context) => {
             `;
 
             if (actualizado.length === 0) {
-                return {
-                    statusCode: 404,
-                    headers,
-                    body: JSON.stringify({ error: 'Pago no encontrado' })
-                };
+                return { statusCode: 404, headers, body: JSON.stringify({ error: 'Pago no encontrado' }) };
             }
 
-            return {
-                statusCode: 200,
-                headers,
-                body: JSON.stringify(actualizado[0])
-            };
+            return { statusCode: 200, headers, body: JSON.stringify(actualizado[0]) };
         }
 
         // ========================================================
@@ -224,34 +243,24 @@ exports.handler = async (event, context) => {
         if (event.httpMethod === 'DELETE') {
             const id = event.queryStringParameters?.id;
             if (!id) {
-                return {
-                    statusCode: 400,
-                    headers,
-                    body: JSON.stringify({ error: 'ID de pago requerido' })
-                };
+                return { statusCode: 400, headers, body: JSON.stringify({ error: 'ID de pago requerido' }) };
             }
 
             await sql`DELETE FROM payments WHERE id = ${id};`;
-
-            return {
-                statusCode: 200,
-                headers,
-                body: JSON.stringify({ success: true, message: 'Pago eliminado correctamente' })
-            };
+            return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
         }
 
-        return {
-            statusCode: 405,
-            headers,
-            body: JSON.stringify({ error: 'Método no permitido' })
-        };
+        return { statusCode: 405, headers, body: JSON.stringify({ error: 'Método no permitido' }) };
 
     } catch (error) {
-        console.error('❌ Error en netlify/functions/payments.js:', error);
+        console.error('❌ Error exacto en payments.js:', error);
         return {
             statusCode: 500,
             headers,
-            body: JSON.stringify({ error: error.message || 'Error interno del servidor' })
+            body: JSON.stringify({ 
+                error: error.message || 'Error en servidor de pagos',
+                detail: error.detail || null
+            })
         };
     }
 };
