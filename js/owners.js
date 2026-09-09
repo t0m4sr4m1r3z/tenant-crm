@@ -1,5 +1,5 @@
-// js/owners.js - Gestión de Propietarios y Liquidaciones
-const OwnersAPI = {
+// js/owners.js - Gestión de Propietarios y Liquidación Privada al Propietario
+const API = {
     baseUrl: '/.netlify/functions',
 
     async request(endpoint, options = {}) {
@@ -10,297 +10,279 @@ const OwnersAPI = {
             ...options.headers
         };
 
-        const res = await fetch(`${this.baseUrl}${endpoint}`, { ...options, headers });
-        if (res.status === 401) {
+        const response = await fetch(`${this.baseUrl}${endpoint}`, { ...options, headers });
+        if (response.status === 401) {
+            sessionStorage.clear();
             window.location.href = '/login.html';
             throw new Error('Sesión expirada');
         }
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || err.message || 'Error en la petición');
-        }
-        return res.json();
+
+        const text = await response.text();
+        const data = text ? JSON.parse(text) : {};
+        if (!response.ok) throw new Error(data.error || 'Error en la petición');
+        return data;
     },
 
     getOwners() { return this.request('/owners'); },
-    getOwnerProperties(id) { return this.request(`/owners?id=${id}&properties=true`); },
-    createOwner(data) { return this.request('/owners', { method: 'POST', body: JSON.stringify(data) }); },
-    updateOwner(data) { return this.request('/owners', { method: 'PUT', body: JSON.stringify(data) }); },
-    deleteOwner(id) { return this.request(`/owners?id=${id}`, { method: 'DELETE' }); }
+    createOwner(owner) { return this.request('/owners', { method: 'POST', body: JSON.stringify(owner) }); },
+    updateOwner(owner) { return this.request('/owners', { method: 'PUT', body: JSON.stringify(owner) }); },
+    deleteOwner(id) { return this.request(`/owners?id=${id}`, { method: 'DELETE' }); },
+    getContracts() { return this.request('/contracts'); },
+    getProperties() { return this.request('/properties'); }
 };
 
-let allOwners = [];
-let currentOwnerViewing = null;
+// Estado global
+let currentOwners = [];
+let allContracts = [];
+let allProperties = [];
+let currentOwnerSummary = null;
 
-document.addEventListener('DOMContentLoaded', () => {
+// ============================================
+// INICIALIZACIÓN
+// ============================================
+
+document.addEventListener('DOMContentLoaded', async () => {
+    const token = sessionStorage.getItem('authToken');
+    if (!token) {
+        window.location.href = '/login.html';
+        return;
+    }
+
     if (window.AppSidebar) AppSidebar.init();
     if (window.Breadcrumbs) Breadcrumbs.init();
 
-    initModalEvents();
-    initSearch();
-
-    cargarOwners();
+    initEventListeners();
+    await cargarDatosIniciales();
 });
 
-function initModalEvents() {
-    const modal = document.getElementById('ownerModal');
+async function cargarDatosIniciales() {
+    try {
+        const [owners, contracts, properties] = await Promise.all([
+            API.getOwners().catch(() => []),
+            API.getContracts().catch(() => []),
+            API.getProperties().catch(() => [])
+        ]);
+
+        currentOwners = Array.isArray(owners) ? owners : [];
+        allContracts = Array.isArray(contracts) ? contracts : [];
+        allProperties = Array.isArray(properties) ? properties : [];
+
+        renderizarTablaPropietarios(currentOwners);
+    } catch (err) {
+        console.error('Error al inicializar propietarios:', err);
+        if (window.UI) UI.toast('Error cargando propietarios', 'error');
+    }
+}
+
+function initEventListeners() {
+    const searchInput = document.getElementById('searchOwners');
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase().trim();
+            const filtrados = currentOwners.filter(o => 
+                (o.name && o.name.toLowerCase().includes(query)) ||
+                (o.dni && o.dni.toLowerCase().includes(query)) ||
+                (o.email && o.email.toLowerCase().includes(query))
+            );
+            renderizarTablaPropietarios(filtrados);
+        });
+    }
+
     const addBtn = document.getElementById('addOwnerBtn');
-    const closeBtn = document.getElementById('closeModalBtn');
-    const form = document.getElementById('ownerForm');
-
     if (addBtn) {
-        addBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            abrirModalNuevoPropietario();
-        });
+        addBtn.addEventListener('click', abrirModalNuevoPropietario);
     }
 
+    const closeBtn = document.getElementById('closeModalBtn');
     if (closeBtn) {
-        closeBtn.addEventListener('click', () => {
-            if (modal) modal.classList.add('hidden');
-        });
+        closeBtn.addEventListener('click', cerrarModalPropietario);
     }
 
-    if (modal) {
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal || e.target.classList.contains('bg-opacity-75')) {
-                modal.classList.add('hidden');
-            }
-        });
-    }
-
-    if (form) {
-        form.addEventListener('submit', async (e) => {
+    const ownerForm = document.getElementById('ownerForm');
+    if (ownerForm) {
+        ownerForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             await guardarPropietario();
         });
     }
-
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            if (modal && !modal.classList.contains('hidden')) modal.classList.add('hidden');
-            const propModal = document.getElementById('propertiesModal');
-            if (propModal && !propModal.classList.contains('hidden')) propModal.classList.add('hidden');
-        }
-    });
 }
 
-function initSearch() {
-    const searchInput = document.getElementById('searchOwners');
-    if (!searchInput) return;
+// ============================================
+// TABLA PRINCIPAL DE PROPIETARIOS
+// ============================================
 
-    searchInput.addEventListener('input', (e) => {
-        const term = e.target.value.toLowerCase().trim();
-        const filtrados = allOwners.filter(o => 
-            (o.name && o.name.toLowerCase().includes(term)) ||
-            (o.dni && o.dni.toLowerCase().includes(term)) ||
-            (o.email && o.email.toLowerCase().includes(term)) ||
-            (o.phone && o.phone.toLowerCase().includes(term))
-        );
-        renderizarTablaOwners(filtrados);
-    });
-}
-
-async function cargarOwners() {
-    const tbody = document.getElementById('ownersTableBody');
-    try {
-        UI.showLoading('ownersTableBody', 'Cargando propietarios...');
-        allOwners = await OwnersAPI.getOwners();
-        renderizarTablaOwners(allOwners);
-    } catch (error) {
-        console.error(error);
-        if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-red-500">Error al cargar propietarios</td></tr>`;
-        }
-    } finally {
-        UI.hideLoading('ownersTableBody');
-    }
-}
-
-function renderizarTablaOwners(lista) {
+function renderizarTablaPropietarios(owners) {
     const tbody = document.getElementById('ownersTableBody');
     if (!tbody) return;
 
-    if (!lista || lista.length === 0) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="6" class="px-6 py-8 text-center text-gray-400">
-                    <i class="fas fa-user-tie text-3xl mb-2 opacity-50"></i>
-                    <p>No hay propietarios registrados</p>
+    if (!owners || owners.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-gray-500">No se encontraron propietarios registrados</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = owners.map(owner => {
+        const contratosOwner = allContracts.filter(c => c.owner_id === owner.id);
+        const contratosActivos = contratosOwner.filter(c => c.status === 'active');
+        
+        // Calcular ingresos netos totales que percibe el propietario (con el descuento ya hecho)
+        const ingresosNetosTotales = contratosActivos.reduce((sum, c) => {
+            const monto = parseFloat(c.base_amount) || 0;
+            const comPct = parseFloat(c.agent_commission) || 0;
+            return sum + (monto * (1 - (comPct / 100)));
+        }, 0);
+
+        return `
+            <tr class="hover:bg-slate-50 transition border-b border-gray-100">
+                <td class="px-6 py-4 font-medium text-slate-800">${AppUtils.escapeHtml(owner.name)}</td>
+                <td class="px-6 py-4 text-slate-600">${AppUtils.escapeHtml(owner.email || '-')}</td>
+                <td class="px-6 py-4 text-slate-600">${AppUtils.escapeHtml(owner.phone || '-')}</td>
+                <td class="px-6 py-4">
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                        ${contratosActivos.length} activos / ${contratosOwner.length} total
+                    </span>
+                </td>
+                <td class="px-6 py-4 font-semibold text-emerald-600">${AppUtils.formatCurrency(ingresosNetosTotales)}</td>
+                <td class="px-6 py-4">
+                    <div class="flex items-center gap-2">
+                        <!-- Botón del edificio: ver resumen -->
+                        <button onclick="verPropiedades(${owner.id})" 
+                                class="p-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition" 
+                                title="Ver Resumen y Liquidación de Propiedades">
+                            <i class="fas fa-building"></i>
+                        </button>
+                        <button onclick="editarPropietario(${owner.id})" 
+                                class="p-2 bg-slate-50 text-slate-600 hover:bg-slate-100 rounded-lg transition" 
+                                title="Editar Propietario">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button onclick="eliminarPropietario(${owner.id})" 
+                                class="p-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition" 
+                                title="Eliminar">
+                            <i class="fas fa-trash-alt"></i>
+                        </button>
+                    </div>
                 </td>
             </tr>
         `;
-        return;
-    }
-
-    tbody.innerHTML = lista.map(o => `
-        <tr class="hover:bg-gray-50 dark:hover:bg-slate-800/50 transition border-b border-gray-100 dark:border-slate-800">
-            <td class="px-6 py-4 font-bold text-slate-900 dark:text-white">
-                ${AppUtils.escapeHtml(o.name)}
-                ${o.dni ? `<span class="block text-xs font-normal text-slate-400">DNI: ${AppUtils.escapeHtml(o.dni)}</span>` : ''}
-            </td>
-            <td class="px-6 py-4 text-slate-600 dark:text-slate-400">${AppUtils.escapeHtml(o.email || '-')}</td>
-            <td class="px-6 py-4 text-slate-600 dark:text-slate-400">${AppUtils.escapeHtml(o.phone || '-')}</td>
-            <td class="px-6 py-4">
-                <button onclick="verPropiedadesPropietario(${o.id}, '${AppUtils.escapeHtml(o.name)}')" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 transition">
-                    <i class="fas fa-building"></i> ${o.contracts_count || 0} contratos
-                </button>
-            </td>
-            <td class="px-6 py-4 font-semibold text-emerald-600 dark:text-emerald-400">
-                ${AppUtils.formatCurrency(o.total_income || 0)}
-            </td>
-            <td class="px-6 py-4">
-                <div class="flex items-center gap-1">
-                    <button onclick="editarPropietario(${o.id})" class="text-blue-600 hover:text-blue-800 p-2 rounded-lg hover:bg-blue-50 transition" title="Editar">
-                        <i class="fas fa-edit"></i>
-                    </button>
-                    <button onclick="eliminarPropietario(${o.id})" class="text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-50 transition" title="Eliminar">
-                        <i class="fas fa-trash-alt"></i>
-                    </button>
-                </div>
-            </td>
-        </tr>
-    `).join('');
-}
-
-function abrirModalNuevoPropietario() {
-    const modal = document.getElementById('ownerModal');
-    const form = document.getElementById('ownerForm');
-    const title = document.getElementById('modalTitle');
-    if (!modal || !form) return;
-
-    form.reset();
-    document.getElementById('ownerId').value = '';
-    if (title) title.textContent = 'Nuevo Propietario';
-
-    modal.classList.remove('hidden');
-}
-
-function editarPropietario(id) {
-    const o = allOwners.find(item => item.id === id);
-    if (!o) return;
-
-    const modal = document.getElementById('ownerModal');
-    const title = document.getElementById('modalTitle');
-    if (!modal) return;
-
-    document.getElementById('ownerId').value = o.id;
-    document.getElementById('ownerDni').value = o.dni || '';
-    document.getElementById('ownerName').value = o.name || '';
-    document.getElementById('ownerEmail').value = o.email || '';
-    document.getElementById('ownerPhone').value = o.phone || '';
-    document.getElementById('ownerAddress').value = o.address || '';
-    document.getElementById('ownerBankAccount').value = o.bank_account || '';
-    document.getElementById('ownerNotes').value = o.notes || '';
-
-    if (title) title.textContent = 'Editar Propietario';
-    modal.classList.remove('hidden');
-}
-
-async function guardarPropietario() {
-    const id = document.getElementById('ownerId').value;
-    const dni = document.getElementById('ownerDni').value.trim();
-    const name = document.getElementById('ownerName').value.trim();
-    const email = document.getElementById('ownerEmail').value.trim();
-    const phone = document.getElementById('ownerPhone').value.trim();
-    const address = document.getElementById('ownerAddress').value.trim();
-    const bank_account = document.getElementById('ownerBankAccount').value.trim();
-    const notes = document.getElementById('ownerNotes').value.trim();
-
-    if (!name) {
-        UI.toast('El nombre es obligatorio', 'warning');
-        return;
-    }
-
-    const payload = { dni, name, email, phone, address, bank_account, notes };
-
-    try {
-        if (id) {
-            payload.id = parseInt(id);
-            await OwnersAPI.updateOwner(payload);
-            UI.toast('Propietario actualizado', 'success');
-        } else {
-            await OwnersAPI.createOwner(payload);
-            UI.toast('Propietario registrado', 'success');
-        }
-
-        document.getElementById('ownerModal').classList.add('hidden');
-        await cargarOwners();
-    } catch (e) {
-        UI.toast(e.message || 'Error al guardar propietario', 'error');
-    }
-}
-
-async function eliminarPropietario(id) {
-    if (!confirm('¿Estás seguro de que deseas eliminar este propietario?')) return;
-
-    try {
-        await OwnersAPI.deleteOwner(id);
-        UI.toast('Propietario eliminado', 'success');
-        await cargarOwners();
-    } catch (err) {
-        UI.toast(err.message || 'No se pudo eliminar el propietario', 'error');
-    }
+    }).join('');
 }
 
 // ============================================
-// MODAL DE PROPIEDADES VINCULADAS AL PROPIETARIO
+// MODAL: ESTADO DE CUENTA PRIVADO
 // ============================================
 
-async function verPropiedadesPropietario(ownerId, ownerName) {
-    currentOwnerViewing = { id: ownerId, name: ownerName };
-    const modal = document.getElementById('propertiesModal');
-    const title = document.getElementById('modalOwnerName');
-    const listContainer = document.getElementById('propertiesList');
+async function verPropiedades(ownerId) {
+    const owner = currentOwners.find(o => o.id === ownerId);
+    if (!owner) return;
 
-    if (!modal) return;
+    const contratos = allContracts.filter(c => c.owner_id === ownerId);
+    const propiedades = allProperties.filter(p => p.owner_id === ownerId);
 
-    if (title) title.textContent = `Propiedades de ${ownerName}`;
-    modal.classList.remove('hidden');
-
-    listContainer.innerHTML = `<div class="text-center py-6"><i class="fas fa-spinner fa-spin text-2xl text-blue-600"></i><p class="mt-2 text-sm text-slate-500">Cargando inmuebles...</p></div>`;
-
-    try {
-        const props = await OwnersAPI.getOwnerProperties(ownerId);
-
-        if (!props || props.length === 0) {
-            listContainer.innerHTML = `<div class="text-center py-6 text-slate-400"><i class="fas fa-building text-3xl mb-2 opacity-50"></i><p>Este propietario no tiene propiedades registradas.</p></div>`;
-            return;
+    // Calcular únicamente el neto acumulado (con descuento ya aplicado)
+    let totalNeto = 0;
+    contratos.forEach(c => {
+        if (c.status === 'active') {
+            const monto = parseFloat(c.base_amount) || 0;
+            const comPct = parseFloat(c.agent_commission) || 0;
+            totalNeto += monto * (1 - (comPct / 100));
         }
+    });
 
-        listContainer.innerHTML = `
-            <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200 dark:divide-slate-700 text-sm">
-                    <thead>
-                        <tr class="text-left text-xs uppercase text-slate-400">
-                            <th class="py-2">Dirección</th>
-                            <th class="py-2">Tipo</th>
-                            <th class="py-2">Inquilino Actual</th>
-                            <th class="py-2 text-right">Renta Mensual</th>
-                            <th class="py-2 text-center">Estado Contrato</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-100 dark:divide-slate-800">
-                        ${props.map(p => `
-                            <tr>
-                                <td class="py-3 font-semibold text-slate-800 dark:text-slate-200">${AppUtils.escapeHtml(p.address)}</td>
-                                <td class="py-3 text-slate-500 uppercase text-xs">${AppUtils.escapeHtml(p.type)}</td>
-                                <td class="py-3 text-slate-700 dark:text-slate-300">${AppUtils.escapeHtml(p.tenant_name || 'Desocupada')}</td>
-                                <td class="py-3 text-right font-bold text-emerald-600">${p.base_amount ? AppUtils.formatCurrency(p.base_amount) : '-'}</td>
-                                <td class="py-3 text-center">
-                                    <span class="badge ${p.contract_status === 'active' ? 'badge-success' : 'badge-warning'}">
-                                        ${p.contract_status === 'active' ? 'Alquilada' : 'Disponible'}
-                                    </span>
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
+    currentOwnerSummary = {
+        owner,
+        contratos,
+        propiedades,
+        totals: {
+            totalNeto,
+            activas: contratos.filter(c => c.status === 'active').length,
+            totalPropiedades: propiedades.length
+        }
+    };
+
+    document.getElementById('modalOwnerName').textContent = `Estado de Cuenta y Liquidación: ${owner.name}`;
+    const container = document.getElementById('propertiesList');
+
+    container.innerHTML = `
+        <!-- ÚNICA TARJETA: NETO A LIQUIDAR (SIN MOSTRAR BRUTO NI COMISIÓN) -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+            <div class="bg-emerald-50 border-2 border-emerald-200 p-5 rounded-xl shadow-sm">
+                <p class="text-xs font-bold uppercase tracking-wider text-emerald-700">Neto a Liquidar a Propietario</p>
+                <p class="text-3xl font-extrabold text-emerald-800 mt-1">${AppUtils.formatCurrency(totalNeto)}</p>
+                <p class="text-xs text-emerald-600 mt-1">Total a transferir / percibir correspondiente al período</p>
             </div>
-        `;
-    } catch (e) {
-        listContainer.innerHTML = `<p class="text-red-500 text-center py-4">Error al cargar las propiedades del propietario.</p>`;
-    }
+            <div class="bg-slate-50 border border-slate-200 p-5 rounded-xl">
+                <p class="text-xs font-bold uppercase tracking-wider text-slate-500">Inmuebles en Gestión</p>
+                <p class="text-3xl font-extrabold text-slate-800 mt-1">${currentOwnerSummary.totals.activas} <span class="text-sm font-normal text-slate-500">alquiladas</span></p>
+                <p class="text-xs text-slate-500 mt-1">De un total de ${propiedades.length} inmuebles registrados</p>
+            </div>
+        </div>
+
+        <!-- Información de acreditación bancaria -->
+        <div class="bg-slate-50 border border-slate-200 p-4 rounded-xl mb-6 text-sm grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div><span class="text-slate-400 block text-xs">DNI / CUIT:</span><span class="font-medium text-slate-700">${AppUtils.escapeHtml(owner.dni || 'No registrado')}</span></div>
+            <div><span class="text-slate-400 block text-xs">Cuenta de Acreditación (CBU / Alias):</span><span class="font-medium text-slate-700">${AppUtils.escapeHtml(owner.bank_account || 'Sin cuenta bancaria registrada')}</span></div>
+            <div><span class="text-slate-400 block text-xs">Contacto:</span><span class="font-medium text-slate-700">${AppUtils.escapeHtml(owner.phone || '')} ${owner.email ? `(${AppUtils.escapeHtml(owner.email)})` : ''}</span></div>
+        </div>
+
+        <!-- Listado Detallado Contrato por Contrato -->
+        <h4 class="font-bold text-slate-800 text-base mb-3 flex items-center gap-2">
+            <i class="fas fa-file-contract text-blue-600"></i>
+            Detalle por Inmueble
+        </h4>
+
+        ${contratos.length === 0 ? `
+            <div class="text-center py-8 bg-gray-50 rounded-xl border border-dashed border-gray-300">
+                <i class="fas fa-home text-gray-400 text-3xl mb-2"></i>
+                <p class="text-sm text-gray-500">Este propietario aún no posee contratos de alquiler activos.</p>
+            </div>
+        ` : `
+            <div class="space-y-4">
+                ${contratos.map((c, index) => {
+                    const monto = parseFloat(c.base_amount) || 0;
+                    const comPct = parseFloat(c.agent_commission) || 0;
+                    const neto = monto * (1 - (comPct / 100));
+
+                    return `
+                        <div class="border border-slate-200 rounded-xl p-5 bg-white shadow-sm hover:border-blue-300 transition">
+                            <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-2 border-b pb-3 mb-3">
+                                <div>
+                                    <span class="text-xs font-bold text-blue-600 uppercase tracking-wider">Inmueble #${index + 1}</span>
+                                    <h5 class="text-base font-bold text-slate-800">${AppUtils.escapeHtml(c.property_address || 'Dirección no especificada')}</h5>
+                                </div>
+                                <span class="px-2.5 py-1 text-xs rounded-full font-semibold ${c.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}">
+                                    ${c.status === 'active' ? 'Activo' : c.status}
+                                </span>
+                            </div>
+
+                            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+                                <div>
+                                    <span class="text-xs text-slate-400 block">Inquilino</span>
+                                    <span class="font-semibold text-slate-800">${AppUtils.escapeHtml(c.tenant_name || 'Sin inquilino')}</span>
+                                    <span class="text-xs text-slate-500 block">${AppUtils.escapeHtml(c.tenant_phone || '')}</span>
+                                </div>
+                                <div>
+                                    <span class="text-xs text-slate-400 block">Vigencia</span>
+                                    <span class="text-slate-700">${AppUtils.formatDate(c.start_date)} al ${AppUtils.formatDate(c.end_date)}</span>
+                                    <span class="text-xs text-slate-400 block">${c.duration || 0} meses</span>
+                                </div>
+                                <div>
+                                    <span class="text-xs text-slate-400 block">Próximo Aumento</span>
+                                    <span class="font-medium text-amber-600">${c.next_increase_date ? AppUtils.formatDate(c.next_increase_date) : 'No programado'}</span>
+                                    <span class="text-xs text-slate-500 block">${(c.increase_type || 'fijo').toUpperCase()}</span>
+                                </div>
+                                <div class="bg-emerald-50/60 border border-emerald-100 p-3 rounded-lg text-right">
+                                    <span class="text-xs text-emerald-700 block uppercase font-semibold">Neto a Liquidar</span>
+                                    <span class="text-base font-black text-emerald-700 block mt-1">${AppUtils.formatCurrency(neto)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `}
+    `;
+
+    document.getElementById('propertiesModal').classList.remove('hidden');
 }
 
 function closePropertiesModal() {
@@ -308,9 +290,369 @@ function closePropertiesModal() {
     if (modal) modal.classList.add('hidden');
 }
 
-// Exportar al objeto global
-window.abrirModalNuevoPropietario = abrirModalNuevoPropietario;
+// ============================================
+// IMPRESIÓN (SIN DATOS DE COMISIÓN)
+// ============================================
+
+function imprimirPropiedades() {
+    if (!currentOwnerSummary) return;
+
+    const { owner, contratos, totals } = currentOwnerSummary;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        alert('Por favor habilita las ventanas emergentes en tu navegador.');
+        return;
+    }
+
+    const htmlContent = `
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+            <meta charset="UTF-8">
+            <title>Liquidación a Propietario - ${AppUtils.escapeHtml(owner.name)}</title>
+            <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; padding: 25px; margin: 0; }
+                .header { border-bottom: 2px solid #0f172a; padding-bottom: 15px; margin-bottom: 20px; display: flex; justify-content: space-between; }
+                .title { font-size: 20px; font-weight: 800; color: #0f172a; }
+                .subtitle { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
+                .kpi-card { padding: 15px; border: 2px solid #059669; border-radius: 8px; background: #ecfdf5; margin-bottom: 20px; display: inline-block; min-width: 250px; }
+                .kpi-title { font-size: 11px; color: #047857; text-transform: uppercase; font-weight: 700; margin: 0; }
+                .kpi-val { font-size: 24px; font-weight: 800; color: #065f46; margin-top: 5px; }
+                table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 12px; }
+                th { background: #0f172a; color: white; padding: 8px 10px; text-align: left; font-size: 10px; text-transform: uppercase; }
+                td { padding: 9px 10px; border-bottom: 1px solid #e2e8f0; }
+                .text-right { text-align: right; }
+                .footer { margin-top: 40px; border-top: 1px dashed #cbd5e1; padding-top: 25px; display: flex; justify-content: space-between; font-size: 11px; color: #64748b; }
+                @media print { body { padding: 0; } }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <div>
+                    <div class="title">MÓRTOLA & ASOCIADOS</div>
+                    <div class="subtitle">Estado de Cuenta y Liquidación a Propietario</div>
+                </div>
+                <div style="text-align: right; font-size: 12px;">
+                    <strong>Fecha:</strong> ${new Date().toLocaleDateString('es-AR')}<br>
+                    <strong>Propietario:</strong> ${AppUtils.escapeHtml(owner.name)}<br>
+                    <strong>DNI/CUIT:</strong> ${AppUtils.escapeHtml(owner.dni || '-')}
+                </div>
+            </div>
+
+            <div class="kpi-card">
+                <div class="kpi-title">Neto a Liquidar a Propietario</div>
+                <div class="kpi-val">${AppUtils.formatCurrency(totals.totalNeto)}</div>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Inmueble</th>
+                        <th>Inquilino</th>
+                        <th>Vigencia</th>
+                        <th class="text-right">Neto a Liquidar</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${contratos.map(c => {
+                        const b = parseFloat(c.base_amount) || 0;
+                        const com = b * ((parseFloat(c.agent_commission) || 0) / 100);
+                        const net = b - com;
+                        return `
+                            <tr>
+                                <td><strong>${AppUtils.escapeHtml(c.property_address || '-')}</strong></td>
+                                <td>${AppUtils.escapeHtml(c.tenant_name || '-')}</td>
+                                <td>${AppUtils.formatDate(c.start_date)} al ${AppUtils.formatDate(c.end_date)}</td>
+                                <td class="text-right"><strong>${AppUtils.formatCurrency(net)}</strong></td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+
+            <div class="footer">
+                <div>Cuenta de Acreditación: ${AppUtils.escapeHtml(owner.bank_account || 'A coordinar')}</div>
+                <div style="text-align: right;">Mórtola & Asociados - Gestión Inmobiliaria</div>
+            </div>
+
+            <script>
+                window.onload = function() {
+                    window.print();
+                    setTimeout(function() { window.close(); }, 500);
+                };
+            <\/script>
+        </body>
+        </html>
+    `;
+
+    printWindow.document.open();
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+}
+
+// ============================================
+// PDF MULTIPÁGINA (SIN DATOS DE COMISIÓN)
+// ============================================
+
+async function exportarPropiedadesPDF() {
+    if (!currentOwnerSummary) return;
+
+    const { owner, contratos, totals } = currentOwnerSummary;
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text('MÓRTOLA & ASOCIADOS', 14, 18);
+
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100);
+    doc.text('INFORME DE LIQUIDACIÓN Y ESTADO DE CUENTA', 14, 23);
+    doc.text(`Fecha de Emisión: ${new Date().toLocaleDateString('es-AR')}`, 14, 28);
+
+    doc.setDrawColor(200);
+    doc.line(14, 31, 196, 31);
+
+    doc.setFontSize(10);
+    doc.setTextColor(40);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Propietario: ${owner.name}`, 14, 38);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`DNI/CUIT: ${owner.dni || 'No registrado'}  |  Tel: ${owner.phone || '-'}  |  Email: ${owner.email || '-'}`, 14, 43);
+    doc.text(`Cuenta Bancaria: ${owner.bank_account || 'Sin datos de cuenta'}`, 14, 48);
+
+    // Tabla sin bruto ni comisión
+    const bodyRows = contratos.map((c, i) => {
+        const monto = parseFloat(c.base_amount) || 0;
+        const comPct = parseFloat(c.agent_commission) || 0;
+        const neto = monto * (1 - (comPct / 100));
+
+        return [
+            `${i + 1}. ${c.property_address || 'Inmueble'}`,
+            c.tenant_name || 'Inquilino',
+            `${c.duration || 0} meses\n(${AppUtils.formatDate(c.start_date)} - ${AppUtils.formatDate(c.end_date)})`,
+            c.status === 'active' ? 'Activo' : c.status,
+            AppUtils.formatCurrency(neto)
+        ];
+    });
+
+    doc.autoTable({
+        startY: 54,
+        head: [['Inmueble', 'Inquilino', 'Período / Vigencia', 'Estado', 'Neto a Liquidar']],
+        body: bodyRows,
+        theme: 'striped',
+        headStyles: { fillColor: [15, 23, 42], fontSize: 9 },
+        bodyStyles: { fontSize: 8.5 },
+        columnStyles: {
+            4: { halign: 'right', fontStyle: 'bold' }
+        },
+        margin: { left: 14, right: 14 }
+    });
+
+    let finalY = doc.lastAutoTable.finalY + 12;
+    if (finalY > 240) {
+        doc.addPage();
+        finalY = 20;
+    }
+
+    // Cuadro de Resumen Neto Final
+    doc.setDrawColor(5, 150, 105);
+    doc.setFillColor(236, 253, 245);
+    doc.roundedRect(14, finalY, 182, 22, 3, 3, 'FD');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(6, 95, 70);
+    doc.text(`TOTAL NETO A LIQUIDAR: ${AppUtils.formatCurrency(totals.totalNeto)}`, 20, finalY + 14);
+
+    // Firma
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100);
+    doc.line(130, finalY + 45, 185, finalY + 45);
+    doc.text('Administración Mórtola & Asoc.', 135, finalY + 49);
+
+    const safeName = owner.name.replace(/[^a-zA-Z0-9]/g, '_');
+    doc.save(`Liquidacion_${safeName}.pdf`);
+    if (window.UI) UI.toast('PDF de liquidación generado', 'success');
+}
+
+// ============================================
+// EXCEL (SIN COLUMNAS DE COMISIÓN NI BRUTO)
+// ============================================
+
+function exportarPropiedadesExcel() {
+    if (!currentOwnerSummary) return;
+
+    const { owner, contratos, totals } = currentOwnerSummary;
+    if (typeof XLSX === 'undefined') {
+        alert('Librería de Excel no cargada.');
+        return;
+    }
+
+    const rows = contratos.map((c, i) => {
+        const monto = parseFloat(c.base_amount) || 0;
+        const comPct = parseFloat(c.agent_commission) || 0;
+        const neto = monto * (1 - (comPct / 100));
+
+        return {
+            'N°': i + 1,
+            'Inmueble': c.property_address || '',
+            'Inquilino': c.tenant_name || '',
+            'Teléfono': c.tenant_phone || '',
+            'Inicio': c.start_date ? c.start_date.slice(0, 10) : '',
+            'Fin': c.end_date ? c.end_date.slice(0, 10) : '',
+            'Estado': c.status || '',
+            'Neto a Liquidar ($)': neto,
+            'Próximo Aumento': c.next_increase_date ? c.next_increase_date.slice(0, 10) : ''
+        };
+    });
+
+    rows.push({
+        'N°': '',
+        'Inmueble': 'TOTAL NETO A LIQUIDAR',
+        'Inquilino': '',
+        'Teléfono': '',
+        'Inicio': '',
+        'Fin': '',
+        'Estado': '',
+        'Neto a Liquidar ($)': totals.totalNeto,
+        'Próximo Aumento': ''
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Liquidación Propietario');
+
+    const safeName = owner.name.replace(/[^a-zA-Z0-9]/g, '_');
+    XLSX.writeFile(workbook, `Liquidacion_${safeName}.xlsx`);
+    if (window.UI) UI.toast('Planilla Excel exportada', 'success');
+}
+
+// ============================================
+// EMAIL PRIVADO AL PROPIETARIO
+// ============================================
+
+function enviarEmailPropietario() {
+    if (!currentOwnerSummary) return;
+
+    const { owner, contratos, totals } = currentOwnerSummary;
+    const email = owner.email || '';
+    const subject = encodeURIComponent(`Liquidación Mensual - ${owner.name}`);
+
+    let detalle = contratos.map((c, i) => {
+        const b = parseFloat(c.base_amount) || 0;
+        const com = b * ((parseFloat(c.agent_commission) || 0) / 100);
+        const net = b - com;
+        return `${i + 1}) Inmueble: ${c.property_address || 'Propiedad'}
+   Inquilino: ${c.tenant_name || '-'}
+   Neto a Liquidar: ${AppUtils.formatCurrency(net)}`;
+    }).join('\n\n');
+
+    const cuerpo = encodeURIComponent(
+`Estimado/a ${owner.name},
+
+Le enviamos el resumen de liquidación correspondiente a sus inmuebles administrados:
+
+${detalle}
+
+---------------------------------------------
+TOTAL NETO A LIQUIDAR: ${AppUtils.formatCurrency(totals.totalNeto)}
+---------------------------------------------
+Cuenta bancaria de depósito: ${owner.bank_account || 'A coordinar'}
+
+Quedamos a su entera disposición ante cualquier consulta.
+
+Atentamente,
+Mórtola & Asociados - Gestión Inmobiliaria`
+    );
+
+    window.location.href = `mailto:${email}?subject=${subject}&body=${cuerpo}`;
+}
+
+// ============================================
+// CRUD BÁSICO DE PROPIETARIOS
+// ============================================
+
+function abrirModalNuevoPropietario() {
+    const form = document.getElementById('ownerForm');
+    if (form) form.reset();
+    document.getElementById('ownerId').value = '';
+    document.getElementById('modalTitle').textContent = 'Nuevo Propietario';
+    document.getElementById('ownerModal').classList.remove('hidden');
+}
+
+function cerrarModalPropietario() {
+    document.getElementById('ownerModal').classList.add('hidden');
+}
+
+function editarPropietario(id) {
+    const owner = currentOwners.find(o => o.id === id);
+    if (!owner) return;
+
+    document.getElementById('ownerId').value = owner.id;
+    document.getElementById('ownerDni').value = owner.dni || '';
+    document.getElementById('ownerName').value = owner.name || '';
+    document.getElementById('ownerEmail').value = owner.email || '';
+    document.getElementById('ownerPhone').value = owner.phone || '';
+    document.getElementById('ownerAddress').value = owner.address || '';
+    document.getElementById('ownerBankAccount').value = owner.bank_account || '';
+    document.getElementById('ownerNotes').value = owner.notes || '';
+
+    document.getElementById('modalTitle').textContent = 'Editar Propietario';
+    document.getElementById('ownerModal').classList.remove('hidden');
+}
+
+async function guardarPropietario() {
+    const id = document.getElementById('ownerId').value;
+    const name = document.getElementById('ownerName').value.trim();
+    if (!name) return;
+
+    const payload = {
+        dni: document.getElementById('ownerDni').value.trim(),
+        name,
+        email: document.getElementById('ownerEmail').value.trim(),
+        phone: document.getElementById('ownerPhone').value.trim(),
+        address: document.getElementById('ownerAddress').value.trim(),
+        bank_account: document.getElementById('ownerBankAccount').value.trim(),
+        notes: document.getElementById('ownerNotes').value.trim()
+    };
+
+    try {
+        if (id) {
+            payload.id = parseInt(id, 10);
+            await API.updateOwner(payload);
+            if (window.UI) UI.toast('Propietario actualizado con éxito', 'success');
+        } else {
+            await API.createOwner(payload);
+            if (window.UI) UI.toast('Propietario registrado con éxito', 'success');
+        }
+
+        cerrarModalPropietario();
+        await cargarDatosIniciales();
+    } catch (err) {
+        if (window.UI) UI.toast(err.message || 'Error al guardar', 'error');
+    }
+}
+
+async function eliminarPropietario(id) {
+    if (!confirm('¿Estás seguro de eliminar este propietario? Esta acción podría desvincular sus propiedades.')) return;
+    try {
+        await API.deleteOwner(id);
+        if (window.UI) UI.toast('Propietario eliminado', 'success');
+        await cargarDatosIniciales();
+    } catch (err) {
+        if (window.UI) UI.toast(err.message || 'Error al eliminar', 'error');
+    }
+}
+
+// Exposición global
+window.verPropiedades = verPropiedades;
+window.closePropertiesModal = closePropertiesModal;
+window.imprimirPropiedades = imprimirPropiedades;
+window.exportarPropiedadesPDF = exportarPropiedadesPDF;
+window.exportarPropiedadesExcel = exportarPropiedadesExcel;
+window.enviarEmailPropietario = enviarEmailPropietario;
 window.editarPropietario = editarPropietario;
 window.eliminarPropietario = eliminarPropietario;
-window.verPropiedadesPropietario = verPropiedadesPropietario;
-window.closePropertiesModal = closePropertiesModal;

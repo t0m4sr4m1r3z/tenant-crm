@@ -87,7 +87,7 @@ async function cargarContratosSelect() {
 
         // Auto-completar monto y comisión al seleccionar contrato en el formulario
         if (modalSelect) {
-            modalSelect.addEventListener('change', (e) => {
+            modalSelect.addEventListener('change', () => {
                 const selectedOpt = modalSelect.options[modalSelect.selectedIndex];
                 if (selectedOpt && selectedOpt.value) {
                     const baseAmount = parseFloat(selectedOpt.dataset.amount || 0);
@@ -168,12 +168,16 @@ function aplicarFiltros() {
 }
 
 function actualizarKPIs() {
-    const hoyStr = new Date().toISOString().split('T')[0];
+    // Usar fecha local exacta sin desfasaje UTC
+    const hoyStr = AppUtils.getTodayString();
     
-    // Calcular fecha límite para próximos 7 días (en formato string YYYY-MM-DD)
+    // Próximos 7 días en fecha local
     const proximaSemana = new Date();
     proximaSemana.setDate(proximaSemana.getDate() + 7);
-    const proximaSemanaStr = proximaSemana.toISOString().split('T')[0];
+    const py = proximaSemana.getFullYear();
+    const pm = String(proximaSemana.getMonth() + 1).padStart(2, '0');
+    const pd = String(proximaSemana.getDate()).padStart(2, '0');
+    const proximaSemanaStr = `${py}-${pm}-${pd}`;
 
     const mesActualStr = hoyStr.slice(0, 7); // "YYYY-MM"
 
@@ -244,6 +248,7 @@ function renderizarTablaPagos() {
         }
 
         const conceptoTexto = CONCEPT_MAP[p.concept] || p.concept || 'Alquiler';
+        // Formateo seguro: si p.due_date es '2026-09-09', devuelve '09/09/2026' exactamente
         const vencimientoFormatted = AppUtils.formatDate(p.due_date);
 
         return `
@@ -327,8 +332,8 @@ function abrirModalNuevoPago() {
     document.getElementById('paymentId').value = '';
     title.textContent = 'Registrar Nuevo Pago';
 
-    const hoy = new Date().toISOString().split('T')[0];
-    document.getElementById('paymentDueDate').value = hoy;
+    // Fecha actual local
+    document.getElementById('paymentDueDate').value = AppUtils.getTodayString();
     document.getElementById('paymentConcept').value = '1';
     document.getElementById('paymentMethod').value = 'transferencia';
     document.getElementById('paymentCommission').value = '0';
@@ -361,8 +366,8 @@ function editarPago(paymentId) {
 
     document.getElementById('paymentAmount').value = p.amount;
     document.getElementById('paymentCommission').value = p.commission || 0;
-    document.getElementById('paymentDueDate').value = p.due_date || '';
-    document.getElementById('paymentDate').value = p.payment_date || '';
+    document.getElementById('paymentDueDate').value = p.due_date ? p.due_date.slice(0, 10) : '';
+    document.getElementById('paymentDate').value = p.payment_date ? p.payment_date.slice(0, 10) : '';
     document.getElementById('paymentMethod').value = p.payment_method || 'transferencia';
     document.getElementById('paymentReference').value = p.reference || '';
     document.getElementById('paymentNotes').value = p.notes || '';
@@ -388,7 +393,7 @@ async function guardarPago() {
     }
 
     const payload = {
-        contract_id: parseInt(contract_id),
+        contract_id: parseInt(contract_id, 10),
         concept: CONCEPT_MAP[conceptCode] || 'Alquiler',
         amount,
         commission,
@@ -401,7 +406,7 @@ async function guardarPago() {
 
     try {
         if (id) {
-            payload.id = parseInt(id);
+            payload.id = parseInt(id, 10);
             await PaymentsAPI.updatePayment(payload);
             UI.toast('Pago actualizado con éxito', 'success');
         } else {
@@ -433,7 +438,7 @@ async function confirmarPagoRapido() {
         await PaymentsAPI.updatePayment({
             id: paymentToConfirm,
             status: 'paid',
-            payment_date: new Date().toISOString().split('T')[0]
+            payment_date: AppUtils.getTodayString()
         });
 
         UI.toast('Cobro registrado correctamente', 'success');

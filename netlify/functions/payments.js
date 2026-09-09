@@ -30,7 +30,7 @@ exports.handler = async (event, context) => {
         await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS phone VARCHAR(50);`;
         await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS dni VARCHAR(50);`;
 
-        // 3. Asegurar todas las columnas en la tabla payments
+        // 3. Asegurar todas las columnas en la tabla payments (incluyendo timestamps)
         await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS contract_id INTEGER;`;
         await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS concept VARCHAR(50) DEFAULT 'Alquiler';`;
         await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS amount NUMERIC(12, 2) DEFAULT 0;`;
@@ -43,6 +43,8 @@ exports.handler = async (event, context) => {
         await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS reference VARCHAR(100);`;
         await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS notes TEXT;`;
         await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'pending';`;
+        await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;`;
+        await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;`;
 
         // ========================================================
         // GET: Consulta ultra-segura (evita errores de tipo en PostgreSQL)
@@ -148,7 +150,12 @@ exports.handler = async (event, context) => {
                 };
             }
 
-            const initialStatus = payment_date ? 'paid' : (status || 'pending');
+            // Validar y limpiar fecha de pago (evita error de sintaxis al castear cadenas vacías a DATE)
+            const cleanPaymentDate = (payment_date && String(payment_date).trim() !== '') 
+                ? String(payment_date).trim() 
+                : null;
+
+            const initialStatus = cleanPaymentDate ? 'paid' : (status || 'pending');
 
             const nuevo = await sql`
                 INSERT INTO payments (
@@ -164,12 +171,12 @@ exports.handler = async (event, context) => {
                     status,
                     updated_at
                 ) VALUES (
-                    ${parseInt(contract_id)},
+                    ${parseInt(contract_id, 10)},
                     ${concept || 'Alquiler'},
                     ${parseFloat(amount)},
                     ${parseFloat(commission) || 0},
                     ${due_date}::DATE,
-                    ${payment_date ? payment_date : null}::DATE,
+                    ${cleanPaymentDate ? cleanPaymentDate : null}::DATE,
                     ${payment_method || 'transferencia'},
                     ${reference || null},
                     ${notes || null},
@@ -206,27 +213,32 @@ exports.handler = async (event, context) => {
                         status = 'paid',
                         payment_date = ${fechaCobro}::DATE,
                         updated_at = NOW()
-                    WHERE id = ${id}
+                    WHERE id = ${parseInt(id, 10)}
                     RETURNING *;
                 `;
                 return { statusCode: 200, headers, body: JSON.stringify(actualizado[0]) };
             }
 
+            // Limpieza de fecha de pago en edición completa
+            const cleanPaymentDate = (body.payment_date && String(body.payment_date).trim() !== '') 
+                ? String(body.payment_date).trim() 
+                : null;
+
             const actualizado = await sql`
                 UPDATE payments
                 SET 
-                    contract_id = ${parseInt(body.contract_id)},
+                    contract_id = ${parseInt(body.contract_id, 10)},
                     concept = ${body.concept || 'Alquiler'},
                     amount = ${parseFloat(body.amount)},
                     commission = ${parseFloat(body.commission) || 0},
                     due_date = ${body.due_date}::DATE,
-                    payment_date = ${body.payment_date ? body.payment_date : null}::DATE,
+                    payment_date = ${cleanPaymentDate ? cleanPaymentDate : null}::DATE,
                     payment_method = ${body.payment_method || 'transferencia'},
                     reference = ${body.reference || null},
                     notes = ${body.notes || null},
-                    status = ${body.payment_date ? 'paid' : (body.status || 'pending')},
+                    status = ${cleanPaymentDate ? 'paid' : (body.status || 'pending')},
                     updated_at = NOW()
-                WHERE id = ${id}
+                WHERE id = ${parseInt(id, 10)}
                 RETURNING *;
             `;
 
@@ -246,7 +258,7 @@ exports.handler = async (event, context) => {
                 return { statusCode: 400, headers, body: JSON.stringify({ error: 'ID de pago requerido' }) };
             }
 
-            await sql`DELETE FROM payments WHERE id = ${id};`;
+            await sql`DELETE FROM payments WHERE id = ${parseInt(id, 10)};`;
             return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
         }
 
