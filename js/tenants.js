@@ -158,6 +158,8 @@ function abrirModalNuevoInquilino() {
     if (!modal || !form) return;
 
     form.reset();
+    if (window.UI) UI.clearAllFieldErrors(form);
+
     document.getElementById('tenantId').value = '';
     if (title) title.textContent = 'Nuevo Inquilino';
 
@@ -169,8 +171,14 @@ function editarInquilino(id) {
     if (!t) return;
 
     const modal = document.getElementById('tenantModal');
+    const form = document.getElementById('tenantForm');
     const title = document.getElementById('modalTitle');
-    if (!modal) return;
+    if (!modal || !form) return;
+
+    form.reset();
+    if (window.UI) UI.clearAllFieldErrors(form);
+
+    if (title) title.textContent = 'Editar Inquilino';
 
     document.getElementById('tenantId').value = t.id;
     document.getElementById('tenantDni').value = t.dni || '';
@@ -179,11 +187,13 @@ function editarInquilino(id) {
     document.getElementById('tenantPhone').value = t.phone || '';
     document.getElementById('tenantAddress').value = t.address || '';
 
-    if (title) title.textContent = 'Editar Inquilino';
     modal.classList.remove('hidden');
 }
 
 async function guardarInquilino() {
+    const form = document.getElementById('tenantForm');
+    if (window.UI) UI.clearAllFieldErrors(form);
+
     const id = document.getElementById('tenantId').value;
     const dni = document.getElementById('tenantDni').value.trim();
     const name = document.getElementById('tenantName').value.trim();
@@ -198,9 +208,16 @@ async function guardarInquilino() {
 
     const payload = { dni, name, email, phone, address };
 
+    const submitBtn = form.querySelector('button[type="submit"]');
+    const originalText = submitBtn ? submitBtn.innerHTML : 'Guardar';
+    if (submitBtn) {
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Guardando...';
+        submitBtn.disabled = true;
+    }
+
     try {
         if (id) {
-            payload.id = parseInt(id);
+            payload.id = parseInt(id, 10);
             await TenantsAPI.updateTenant(payload);
             UI.toast('Inquilino actualizado con éxito', 'success');
         } else {
@@ -208,10 +225,18 @@ async function guardarInquilino() {
             UI.toast('Inquilino registrado con éxito', 'success');
         }
 
+        // Invalidar caché si está disponible para que las listas se sincronicen
+        if (window.APICache) window.APICache.clear();
+
         document.getElementById('tenantModal').classList.add('hidden');
         await cargarTenants();
     } catch (e) {
         UI.toast(e.message || 'Error al procesar inquilino', 'error');
+    } finally {
+        if (submitBtn) {
+            submitBtn.innerHTML = originalText;
+            submitBtn.disabled = false;
+        }
     }
 }
 
@@ -221,6 +246,7 @@ async function eliminarInquilino(id) {
     try {
         await TenantsAPI.deleteTenant(id);
         UI.toast('Inquilino eliminado', 'success');
+        if (window.APICache) window.APICache.clear();
         await cargarTenants();
     } catch (err) {
         UI.toast(err.message || 'No se pudo eliminar el inquilino', 'error');

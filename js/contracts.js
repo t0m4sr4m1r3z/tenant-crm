@@ -1,4 +1,4 @@
-// js/contracts.js - Gestión de Contratos y Recibos Oficiales (Mórtola & Asociados)
+// js/contracts.js - Gestión de Contratos y Recibos Oficiales (Inmobiliaria Mórtola y Asociados)
 const API = {
     baseUrl: '/.netlify/functions',
 
@@ -242,10 +242,10 @@ function initFileUpload() {
                 });
 
                 renderContractFiles();
-                if (window.UI) UI.toast(`Archivo ${file.name} adjuntado`, 'success');
+                UI.toast(`Archivo ${file.name} adjuntado`, 'success');
             } catch (err) {
                 console.error(err);
-                if (window.UI) UI.toast(`Error al subir ${file.name}`, 'error');
+                UI.toast(`Error al subir ${file.name}`, 'error');
             } finally {
                 uploadBtn.disabled = false;
                 uploadBtn.innerHTML = '<i class="fas fa-cloud-upload-alt mr-2"></i>Subir documento (PDF, imagen)';
@@ -570,115 +570,115 @@ function applyFilter() {
 }
 
 // ============================================
-// CRUD CONTRATOS
+// MODAL NUEVO / EDITAR
 // ============================================
 
 function abrirModalNuevoContrato() {
+    const modal = document.getElementById('contractModal');
+    const title = document.getElementById('contractModalTitle');
     const form = document.getElementById('contractForm');
-    if (form) form.reset();
+    if (!modal || !form) return;
+
+    form.reset();
     if (window.UI) UI.clearAllFieldErrors(form);
 
     document.getElementById('contractId').value = '';
-    document.getElementById('contractModalTitle').textContent = 'Nuevo Contrato';
-    
-    // Valores predeterminados
-    const hoy = new Date().toISOString().slice(0, 10);
-    document.getElementById('contractStartDate').value = hoy;
+    title.textContent = 'Nuevo Contrato';
+
+    // Fecha actual local sin desfasaje
+    document.getElementById('contractStartDate').value = AppUtils.getTodayString();
+    document.getElementById('contractReferenceDate').value = '';
     document.getElementById('contractDuration').value = '24';
     document.getElementById('contractIncreaseFrequency').value = '12';
     document.getElementById('contractAgentCommission').value = '5';
-    document.getElementById('contractIncreaseType').value = 'fixed';
-    
-    const valInput = document.getElementById('contractIncreaseValue');
-    if (valInput) {
-        valInput.disabled = false;
-        valInput.value = '10';
-    }
+    document.getElementById('contractStatus').value = 'active';
+
+    const incType = document.getElementById('contractIncreaseType');
+    incType.value = 'fixed';
+    document.getElementById('contractIncreaseValue').disabled = false;
 
     currentContractFiles = [];
     renderContractFiles();
 
-    document.getElementById('contractModal').classList.remove('hidden');
+    modal.classList.remove('hidden');
 }
 
-function abrirModalEditarContrato(id) {
-    const contract = currentContracts.find(c => c.id === id);
-    if (!contract) return;
-
+function abrirModalEditarContrato(contractId) {
+    const modal = document.getElementById('contractModal');
+    const title = document.getElementById('contractModalTitle');
     const form = document.getElementById('contractForm');
+    if (!modal || !form) return;
+
+    const contract = currentContracts.find(c => c.id === contractId);
+    if (!contract) {
+        UI.toast('Contrato no encontrado', 'error');
+        return;
+    }
+
+    form.reset();
     if (window.UI) UI.clearAllFieldErrors(form);
 
-    document.getElementById('contractId').value = contract.id;
-    document.getElementById('contractModalTitle').textContent = 'Editar Contrato';
+    title.textContent = 'Editar Contrato';
 
+    document.getElementById('contractId').value = contract.id;
     document.getElementById('contractTenantId').value = contract.tenant_id || '';
     document.getElementById('contractOwnerId').value = contract.owner_id || '';
     document.getElementById('contractPropertyId').value = contract.property_id || '';
+
     document.getElementById('contractStartDate').value = contract.start_date ? contract.start_date.slice(0, 10) : '';
     document.getElementById('contractReferenceDate').value = contract.reference_date ? contract.reference_date.slice(0, 10) : '';
-    document.getElementById('contractDuration').value = contract.duration || '';
+    document.getElementById('contractDuration').value = contract.duration || 12;
     document.getElementById('contractBaseAmount').value = contract.base_amount || '';
-    
-    document.getElementById('contractIncreaseType').value = contract.increase_type || 'fixed';
-    const valInput = document.getElementById('contractIncreaseValue');
-    if (valInput) {
-        if (contract.increase_type === 'fixed') {
-            valInput.disabled = false;
-            valInput.value = contract.increase_value || '';
-        } else {
-            valInput.disabled = true;
-            valInput.value = '';
-        }
-    }
 
-    document.getElementById('contractIncreaseFrequency').value = contract.increase_frequency || '12';
-    document.getElementById('contractAgentCommission').value = contract.agent_commission || '5';
+    const incType = document.getElementById('contractIncreaseType');
+    incType.value = contract.increase_type || 'fixed';
+
+    const incVal = document.getElementById('contractIncreaseValue');
+    incVal.value = contract.increase_value || '';
+    incVal.disabled = incType.value !== 'fixed';
+
+    document.getElementById('contractIncreaseFrequency').value = contract.increase_frequency || 12;
+    document.getElementById('contractAgentCommission').value = contract.agent_commission || 5;
     document.getElementById('contractStatus').value = contract.status || 'active';
 
-    try {
-        currentContractFiles = Array.isArray(contract.files) ? [...contract.files] : (contract.files ? JSON.parse(contract.files) : []);
-    } catch (e) {
-        currentContractFiles = [];
-    }
+    currentContractFiles = contract.documents || [];
     renderContractFiles();
 
-    document.getElementById('contractModal').classList.remove('hidden');
+    modal.classList.remove('hidden');
 }
 
 async function guardarContrato() {
     const form = document.getElementById('contractForm');
-    if (!form) return;
-
     if (window.UI) UI.clearAllFieldErrors(form);
 
     const id = document.getElementById('contractId').value;
-    const tenant_id = document.getElementById('contractTenantId').value;
-    const owner_id = document.getElementById('contractOwnerId').value;
-    const property_id = document.getElementById('contractPropertyId').value;
+    const tenant_id = parseInt(document.getElementById('contractTenantId').value, 10);
+    const owner_id = parseInt(document.getElementById('contractOwnerId').value, 10);
+    const property_id = parseInt(document.getElementById('contractPropertyId').value, 10);
     const start_date = document.getElementById('contractStartDate').value;
-    const reference_date = document.getElementById('contractReferenceDate').value || start_date;
+    const reference_date = document.getElementById('contractReferenceDate').value || null;
     const duration = parseInt(document.getElementById('contractDuration').value, 10);
     const base_amount = parseFloat(document.getElementById('contractBaseAmount').value);
     const increase_type = document.getElementById('contractIncreaseType').value;
-    const increase_value = increase_type === 'fixed' ? parseFloat(document.getElementById('contractIncreaseValue').value || 0) : 0;
-    const increase_frequency = parseInt(document.getElementById('contractIncreaseFrequency').value, 10);
-    const agent_commission = parseFloat(document.getElementById('contractAgentCommission').value || 0);
+    const increase_value = parseFloat(document.getElementById('contractIncreaseValue').value) || 0;
+    const increase_frequency = parseInt(document.getElementById('contractIncreaseFrequency').value, 10) || 12;
+    const agent_commission = parseFloat(document.getElementById('contractAgentCommission').value) || 0;
     const status = document.getElementById('contractStatus').value;
 
-    let valid = true;
-    if (!tenant_id) { UI.showFieldError(document.getElementById('contractTenantId'), 'Selecciona un inquilino'); valid = false; }
-    if (!owner_id) { UI.showFieldError(document.getElementById('contractOwnerId'), 'Selecciona un propietario'); valid = false; }
-    if (!property_id) { UI.showFieldError(document.getElementById('contractPropertyId'), 'Selecciona una propiedad'); valid = false; }
-    if (!start_date) { UI.showFieldError(document.getElementById('contractStartDate'), 'Fecha requerida'); valid = false; }
-    if (isNaN(duration) || duration <= 0) { UI.showFieldError(document.getElementById('contractDuration'), 'Duración inválida'); valid = false; }
-    if (isNaN(base_amount) || base_amount <= 0) { UI.showFieldError(document.getElementById('contractBaseAmount'), 'Monto inválido'); valid = false; }
+    let isValid = true;
+    if (!tenant_id) { UI.showFieldError(document.getElementById('contractTenantId'), 'Selecciona un inquilino'); isValid = false; }
+    if (!owner_id) { UI.showFieldError(document.getElementById('contractOwnerId'), 'Selecciona un propietario'); isValid = false; }
+    if (!property_id) { UI.showFieldError(document.getElementById('contractPropertyId'), 'Selecciona una propiedad'); isValid = false; }
+    if (!start_date) { UI.showFieldError(document.getElementById('contractStartDate'), 'Ingresa la fecha de inicio'); isValid = false; }
+    if (isNaN(duration) || duration < 1) { UI.showFieldError(document.getElementById('contractDuration'), 'Duración mínima: 1 mes'); isValid = false; }
+    if (isNaN(base_amount) || base_amount <= 0) { UI.showFieldError(document.getElementById('contractBaseAmount'), 'Monto inválido'); isValid = false; }
 
-    if (!valid) return;
+    if (!isValid) return;
 
     const payload = {
-        tenant_id: parseInt(tenant_id, 10),
-        owner_id: parseInt(owner_id, 10),
-        property_id: parseInt(property_id, 10),
+        tenant_id,
+        owner_id,
+        property_id,
         start_date,
         reference_date,
         duration,
@@ -688,47 +688,52 @@ async function guardarContrato() {
         increase_frequency,
         agent_commission,
         status,
-        files: currentContractFiles
+        documents: currentContractFiles
     };
 
     const submitBtn = form.querySelector('button[type="submit"]');
-    const originalText = submitBtn.innerHTML;
-    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Guardando...';
-    submitBtn.disabled = true;
+    const originalText = submitBtn ? submitBtn.innerHTML : 'Guardar Contrato';
+    if (submitBtn) {
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Guardando...';
+        submitBtn.disabled = true;
+    }
 
     try {
         if (id) {
             payload.id = parseInt(id, 10);
             await API.updateContract(payload);
-            if (window.UI) UI.toast('Contrato actualizado con éxito', 'success');
+            UI.toast('Contrato actualizado con éxito', 'success');
         } else {
             await API.createContract(payload);
-            if (window.UI) UI.toast('Contrato creado con éxito', 'success');
+            UI.toast('Contrato creado con éxito', 'success');
         }
 
-        if (window.APICache) APICache.clear();
         document.getElementById('contractModal').classList.add('hidden');
+        if (window.APICache) window.APICache.clear();
         await loadContracts();
-    } catch (error) {
-        console.error('Error al guardar contrato:', error);
-        if (window.UI) UI.toast(error.message || 'Error al guardar contrato', 'error');
+    } catch (err) {
+        console.error(err);
+        UI.toast(err.message || 'Error al guardar el contrato', 'error');
     } finally {
-        submitBtn.innerHTML = originalText;
-        submitBtn.disabled = false;
+        if (submitBtn) {
+            submitBtn.innerHTML = originalText;
+            submitBtn.disabled = false;
+        }
     }
 }
 
-async function eliminarContratoGlobal(id) {
-    if (!confirm('¿Estás seguro de eliminar este contrato? Esta acción eliminará los pagos asociados.')) return;
+async function eliminarContratoGlobal(contractId) {
+    if (!confirm('¿Estás seguro de que deseas eliminar este contrato? Los pagos vinculados podrían verse afectados.')) {
+        return;
+    }
 
     try {
-        await API.deleteContract(id);
-        if (window.UI) UI.toast('Contrato eliminado correctamente', 'success');
-        if (window.APICache) APICache.clear();
+        await API.deleteContract(contractId);
+        UI.toast('Contrato eliminado correctamente', 'success');
+        if (window.APICache) window.APICache.clear();
         await loadContracts();
     } catch (error) {
-        console.error('Error al eliminar contrato:', error);
-        if (window.UI) UI.toast(error.message || 'No se pudo eliminar el contrato', 'error');
+        UI.toast(error.message || 'Error al eliminar el contrato', 'error');
     }
 }
 
@@ -740,193 +745,163 @@ async function calcularAumentoGlobal(contractId) {
     const contract = currentContracts.find(c => c.id === contractId);
     if (!contract) return;
 
+    let percentage = parseFloat(contract.increase_value || 0);
+
+    if (contract.increase_type === 'ipc' || contract.increase_type === 'icl') {
+        try {
+            const indices = await API.getIndices();
+            percentage = contract.increase_type === 'ipc' ? (indices.ipc || 0) : (indices.icl || 0);
+        } catch (e) {
+            console.warn('No se pudo obtener índice en tiempo real, usando fallback local.');
+        }
+    }
+
+    const currentAmount = parseFloat(contract.base_amount);
+    const newAmount = currentAmount * (1 + (percentage / 100));
+
+    currentReceiptData = {
+        contract,
+        calculation: {
+            currentAmount,
+            percentage,
+            newAmount,
+            date: AppUtils.getTodayString()
+        }
+    };
+
     const modal = document.getElementById('calculationModal');
     const resultDiv = document.getElementById('calculationResult');
-    if (!modal || !resultDiv) return;
 
-    resultDiv.innerHTML = '<div class="text-center py-6"><i class="fas fa-spinner fa-spin text-2xl text-blue-600"></i><p class="mt-2 text-sm text-gray-500">Calculando índices...</p></div>';
+    resultDiv.innerHTML = `
+        <div class="p-4 bg-slate-50 dark:bg-slate-800 rounded-xl space-y-3">
+            <div class="flex justify-between text-sm">
+                <span class="text-slate-500">Inquilino:</span>
+                <span class="font-bold text-slate-800 dark:text-white">${AppUtils.escapeHtml(contract.tenant_name || 'N/A')}</span>
+            </div>
+            <div class="flex justify-between text-sm">
+                <span class="text-slate-500">Monto actual:</span>
+                <span class="font-bold">${AppUtils.formatCurrency(currentAmount)}</span>
+            </div>
+            <div class="flex justify-between text-sm">
+                <span class="text-slate-500">Índice aplicado (${contract.increase_type.toUpperCase()}):</span>
+                <span class="font-bold text-blue-600">+${percentage.toFixed(2)}%</span>
+            </div>
+            <div class="border-t border-slate-200 dark:border-slate-700 pt-3 flex justify-between text-base">
+                <span class="font-semibold text-slate-800 dark:text-white">Nuevo Monto Calculado:</span>
+                <span class="font-extrabold text-emerald-600 text-lg">${AppUtils.formatCurrency(newAmount)}</span>
+            </div>
+        </div>
+        <div class="flex gap-3 justify-end mt-5">
+            <button onclick="document.getElementById('calculationModal').classList.add('hidden')" class="px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800">
+                Cancelar
+            </button>
+            <button onclick="aplicarAumento(${contract.id}, ${newAmount})" class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium">
+                <i class="fas fa-check mr-1"></i> Aplicar y Actualizar
+            </button>
+        </div>
+    `;
+
     modal.classList.remove('hidden');
+}
+
+async function aplicarAumento(contractId, nuevoMonto) {
+    if (!confirm(`¿Confirmas actualizar el monto base del contrato a ${AppUtils.formatCurrency(nuevoMonto)}?`)) return;
 
     try {
-        let porcentaje = parseFloat(contract.increase_value) || 0;
-        let detalleCalculo = '';
-
-        if (contract.increase_type !== 'fixed') {
-            const indicesData = await API.getIndices().catch(() => ({}));
-            const tipo = (contract.increase_type || 'ipc').toLowerCase();
-            const indiceMes = indicesData[tipo] || 3.5;
-            const meses = contract.increase_frequency || 12;
-            
-            porcentaje = (indiceMes * (meses / 12) * 10).toFixed(2);
-            detalleCalculo = `Índice ${tipo.toUpperCase()} estimado acumulado (${meses} meses): ${porcentaje}%`;
-        } else {
-            detalleCalculo = `Aumento fijo pactado contractualmente: ${porcentaje}%`;
-        }
-
-        const montoBase = parseFloat(contract.base_amount) || 0;
-        const incrementoMonto = (montoBase * (porcentaje / 100));
-        const nuevoMonto = montoBase + incrementoMonto;
-
-        resultDiv.innerHTML = `
-            <div class="bg-blue-50 p-4 rounded-xl border border-blue-100">
-                <h4 class="font-bold text-blue-900 mb-1">Inquilino: ${AppUtils.escapeHtml(contract.tenant_name || 'N/A')}</h4>
-                <p class="text-xs text-blue-700">Propiedad: ${AppUtils.escapeHtml(contract.property_address || 'Inmueble')}</p>
-            </div>
-            <div class="grid grid-cols-2 gap-4">
-                <div class="p-3 bg-gray-50 rounded-lg">
-                    <span class="text-xs text-gray-500 block">Monto Anterior</span>
-                    <span class="text-lg font-bold text-gray-700">${AppUtils.formatCurrency(montoBase)}</span>
-                </div>
-                <div class="p-3 bg-green-50 rounded-lg">
-                    <span class="text-xs text-green-600 block">Nuevo Monto Estimado</span>
-                    <span class="text-xl font-bold text-green-700">${AppUtils.formatCurrency(nuevoMonto)}</span>
-                </div>
-            </div>
-            <p class="text-sm text-gray-600 border-l-4 border-blue-500 pl-3 py-1">${detalleCalculo}</p>
-            <div class="pt-4 flex justify-end gap-2">
-                <button onclick="document.getElementById('calculationModal').classList.add('hidden')" class="px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm">Cerrar</button>
-                <button onclick="abrirReciboModal(${contract.id}, ${nuevoMonto})" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm flex items-center gap-1">
-                    <i class="fas fa-file-invoice"></i> Confeccionar Recibo
-                </button>
-            </div>
-        `;
+        await API.updateContract({ id: contractId, base_amount: nuevoMonto });
+        UI.toast('Contrato actualizado con el nuevo valor', 'success');
+        document.getElementById('calculationModal').classList.add('hidden');
+        if (window.APICache) window.APICache.clear();
+        await loadContracts();
     } catch (e) {
-        resultDiv.innerHTML = '<p class="text-red-500 text-center py-4">Error al calcular el aumento.</p>';
+        UI.toast('Error al aplicar aumento', 'error');
     }
 }
 
 // ============================================
-// HELPER: CARGAR IMAGEN EN BASE64
+// RECIBO OFICIAL (INMOBILIARIA MÓRTOLA Y ASOCIADOS)
 // ============================================
 
-async function getBase64ImageFromUrl(imageUrl) {
-    try {
-        const res = await fetch(imageUrl);
-        if (!res.ok) return null;
-        const blob = await res.blob();
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result);
-            reader.onerror = () => resolve(null);
-            reader.readAsDataURL(blob);
-        });
-    } catch (err) {
-        return null;
-    }
-}
-
-// ============================================
-// RECIBO OFICIAL DE ALQUILER
-// ============================================
-
-function abrirReciboModal(contractId, customAmount = null) {
+function abrirReciboModal(contractId) {
     const contract = currentContracts.find(c => c.id === contractId);
     if (!contract) return;
 
-    const modal = document.getElementById('receiptModal');
-    const content = document.getElementById('receiptContent');
-    if (!modal || !content) return;
-
-    const monto = customAmount !== null ? customAmount : (parseFloat(contract.base_amount) || 0);
-    const comisionPct = parseFloat(contract.agent_commission) || 0;
-    const comision = monto * (comisionPct / 100);
-    const netoPropietario = monto - comision;
-
-    const hoy = new Date();
-    const numeroRecibo = `REC-${contract.id}-${hoy.getFullYear()}${(hoy.getMonth() + 1).toString().padStart(2, '0')}`;
+    const montoTotal = parseFloat(contract.base_amount) || 0;
 
     currentReceiptData = {
-        numero: numeroRecibo,
-        fecha: hoy.toISOString().slice(0, 10),
-        inquilino: contract.tenant_name || 'Inquilino',
-        inquilinoDni: contract.tenant_dni || '-',
-        inquilinoPhone: contract.tenant_phone || '',
-        inquilinoEmail: contract.tenant_email || '',
-        propietario: contract.owner_name || 'Propietario',
-        propiedad: contract.property_address || 'Inmueble arrendado',
-        montoBase: monto,
-        comisionPct,
-        comision,
-        netoPropietario,
-        periodo: hoy.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
+        receiptNumber: `REC-${contract.id}-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}`,
+        date: new Date().toLocaleDateString('es-AR'),
+        contract,
+        montoTotal
     };
 
+    const modal = document.getElementById('receiptModal');
+    const content = document.getElementById('receiptContent');
+
     content.innerHTML = `
-        <div class="border-2 border-slate-200 p-6 rounded-2xl bg-white space-y-6 text-slate-800" id="receiptPrintArea">
-            <!-- Encabezado con LOGO EN LA ESQUINA SUPERIOR IZQUIERDA -->
-            <div class="flex justify-between items-start border-b pb-4">
-                <div class="flex items-center gap-4">
-                    <img src="/icons/sello.png" alt="Logo Inmobiliaria" 
-                         class="h-16 w-auto object-contain max-w-[90px]" 
-                         onerror="this.style.display='none'" />
+        <div id="printableReceipt" class="p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl space-y-6">
+            
+            <!-- Cabecera Institucional con Sello -->
+            <div class="flex flex-col sm:flex-row justify-between items-center sm:items-start border-b pb-5 dark:border-slate-800 gap-4">
+                <div class="flex items-center gap-4 text-center sm:text-left">
+                    <div class="w-20 h-20 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center overflow-hidden p-1 shadow-sm">
+                        <img src="/icons/sello.png" 
+                             alt="Sello Inmobiliaria Mórtola y Asociados" 
+                             class="max-h-full max-w-full object-contain"
+                             onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'text-center text-[10px] font-bold text-primary-600 leading-tight\\'>MÓRTOLA<br>& ASOC.</div>';">
+                    </div>
                     <div>
-                        <h2 class="text-2xl font-black tracking-tight text-slate-900">MÓRTOLA & ASOCIADOS</h2>
-                        <p class="text-xs text-slate-500 uppercase tracking-widest font-semibold">Administración de Propiedades y Gestión Inmobiliaria</p>
-                        <p class="text-xs text-slate-500 mt-1">Matrícula Profesional C.U.I.T. 20-34567890-9</p>
+                        <h2 class="text-2xl font-black text-slate-900 dark:text-white tracking-tight">INMOBILIARIA MÓRTOLA Y ASOCIADOS</h2>
+                        <p class="text-xs uppercase font-bold tracking-widest text-primary-600 dark:text-primary-400">Administración de Alquileres y Propiedades</p>
+                        <p class="text-xs text-slate-400 mt-0.5">RECIBO OFICIAL DE COBRANZA</p>
                     </div>
                 </div>
-                <div class="text-right">
-                    <div class="inline-block bg-slate-900 text-white px-3 py-1 rounded-lg text-xs font-bold mb-1 tracking-wider">
-                        RECIBO OFICIAL
-                    </div>
-                    <p class="text-sm font-semibold text-slate-700">${numeroRecibo}</p>
-                    <p class="text-xs text-slate-400">Fecha: ${AppUtils.formatDate(currentReceiptData.fecha)}</p>
+                <div class="text-center sm:text-right bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl border border-slate-100 dark:border-slate-700/50">
+                    <p class="font-extrabold text-sm text-slate-800 dark:text-slate-200">${currentReceiptData.receiptNumber}</p>
+                    <p class="text-xs text-slate-500 mt-1">Fecha: <strong>${currentReceiptData.date}</strong></p>
                 </div>
             </div>
 
-            <!-- Datos de partes -->
-            <div class="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl text-sm">
+            <!-- Datos del Inquilino y Propiedad -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm bg-slate-50/50 dark:bg-slate-800/30 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
                 <div>
-                    <span class="text-xs text-slate-400 font-semibold block uppercase">Inquilino / Locatario</span>
-                    <p class="font-bold text-slate-800">${AppUtils.escapeHtml(currentReceiptData.inquilino)}</p>
-                    <p class="text-xs text-slate-500">DNI: ${AppUtils.escapeHtml(currentReceiptData.inquilinoDni)}</p>
+                    <p class="text-slate-400 text-xs uppercase font-semibold">Inquilino</p>
+                    <p class="font-bold text-slate-800 dark:text-slate-200 text-base">${AppUtils.escapeHtml(contract.tenant_name || 'N/A')}</p>
                 </div>
                 <div>
-                    <span class="text-xs text-slate-400 font-semibold block uppercase">Propietario / Locador</span>
-                    <p class="font-bold text-slate-800">${AppUtils.escapeHtml(currentReceiptData.propietario)}</p>
-                    <p class="text-xs text-slate-500">Inmueble: ${AppUtils.escapeHtml(currentReceiptData.propiedad)}</p>
+                    <p class="text-slate-400 text-xs uppercase font-semibold">Propietario</p>
+                    <p class="font-medium text-slate-700 dark:text-slate-300 text-base">${AppUtils.escapeHtml(contract.owner_name || 'N/A')}</p>
+                </div>
+                <div class="col-span-full border-t border-slate-200/50 dark:border-slate-700/50 pt-3">
+                    <p class="text-slate-400 text-xs uppercase font-semibold">Inmueble Locado</p>
+                    <p class="font-medium text-slate-800 dark:text-slate-200">${AppUtils.escapeHtml(contract.property_address || 'Sin especificar')}</p>
                 </div>
             </div>
 
-            <!-- Conceptos -->
-            <table class="w-full text-sm border-collapse">
+            <!-- Detalle del Pago -->
+            <table class="w-full text-sm border-t border-b border-slate-200 dark:border-slate-800 my-4">
                 <thead>
-                    <tr class="border-b text-slate-500 text-left text-xs uppercase">
-                        <th class="py-2">Descripción</th>
-                        <th class="py-2 text-right">Importe</th>
+                    <tr class="text-slate-400 text-left uppercase text-xs">
+                        <th class="py-3">Concepto</th>
+                        <th class="py-3 text-right">Importe</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-100">
+                <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
                     <tr>
-                        <td class="py-3">
-                            <p class="font-medium text-slate-800">Alquiler correspondiente al período: <span class="capitalize">${currentReceiptData.periodo}</span></p>
-                            <p class="text-xs text-slate-400">${AppUtils.escapeHtml(currentReceiptData.propiedad)}</p>
-                        </td>
-                        <td class="py-3 text-right font-semibold text-slate-900">${AppUtils.formatCurrency(currentReceiptData.montoBase)}</td>
+                        <td class="py-4 text-slate-700 dark:text-slate-300 font-medium">Canon locativo mensual</td>
+                        <td class="py-4 text-right font-bold text-slate-900 dark:text-white text-base">${AppUtils.formatCurrency(montoTotal)}</td>
                     </tr>
                 </tbody>
                 <tfoot>
-                    <tr class="border-t-2 border-slate-900 font-bold text-base">
-                        <td class="py-3">TOTAL ABONADO</td>
-                        <td class="py-3 text-right text-emerald-600">${AppUtils.formatCurrency(currentReceiptData.montoBase)}</td>
+                    <tr class="font-bold text-base bg-emerald-50/60 dark:bg-emerald-950/20 border-t-2 border-emerald-500">
+                        <td class="py-3 px-3 text-slate-900 dark:text-white uppercase tracking-wider text-sm">TOTAL ABONADO</td>
+                        <td class="py-3 px-3 text-right text-emerald-600 dark:text-emerald-400 text-xl font-black">${AppUtils.formatCurrency(montoTotal)}</td>
                     </tr>
                 </tfoot>
             </table>
 
-            <!-- Liquidación de Honorarios / Administración -->
-            <div class="border-t pt-3 flex justify-between items-center text-xs text-slate-500">
-                <span>Comisión administrativa de gestión (${currentReceiptData.comisionPct}%): ${AppUtils.formatCurrency(currentReceiptData.comision)}</span>
-                <span class="font-medium">Neto a liquidar a propietario: ${AppUtils.formatCurrency(currentReceiptData.netoPropietario)}</span>
-            </div>
-
-            <!-- Firmas Limpias -->
-            <div class="grid grid-cols-2 gap-12 pt-10 text-center text-xs text-slate-500">
-                <div class="border-t border-dashed border-slate-300 pt-3">
-                    Firma y Aclaración Inquilino
-                </div>
-                <div class="border-t border-dashed border-slate-300 pt-3">
-                    Firma Administración
-                </div>
+            <div class="text-center pt-3 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-400 font-medium">
+                Documento extendido a título de constancia administrativa en el sistema de Inmobiliaria Mortola Y Asociados.
             </div>
         </div>
     `;
@@ -943,120 +918,138 @@ function imprimirRecibo() {
     window.print();
 }
 
-async function descargarPDF() {
-    if (!currentReceiptData) return;
-
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({
-        orientation: 'p',
-        unit: 'mm',
-        format: 'a4'
-    });
-
-    // Intentar cargar logo para esquina superior izquierda
-    const logoBase64 = await getBase64ImageFromUrl('/icons/sello.png');
-    let startTextX = 14;
-
-    if (logoBase64) {
-        // Logo en la esquina superior izquierda
-        doc.addImage(logoBase64, 'PNG', 14, 12, 22, 22);
-        startTextX = 40;
+function descargarPDF() {
+    if (!currentReceiptData || !window.jspdf) {
+        UI.toast('Módulo PDF no disponible', 'error');
+        return;
     }
 
-    // Encabezado institucional
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const d = currentReceiptData;
+
+    doc.setFontSize(16);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(17);
-    doc.text('MÓRTOLA & ASOCIADOS', startTextX, 19);
+    doc.text('INMOBILIARIA MORTOLA Y ASOCIADOS', 14, 20);
 
-    doc.setFontSize(8.5);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100);
-    doc.text('Administración de Propiedades y Gestión Inmobiliaria', startTextX, 24);
-    doc.text(`Recibo N°: ${currentReceiptData.numero} | Fecha: ${currentReceiptData.fecha}`, startTextX, 29);
-
-    doc.setDrawColor(200);
-    doc.line(14, 37, 196, 37);
-
-    // Datos de Partes
     doc.setFontSize(10);
-    doc.setTextColor(50);
-    doc.text(`Inquilino: ${currentReceiptData.inquilino} (DNI: ${currentReceiptData.inquilinoDni})`, 14, 45);
-    doc.text(`Propietario: ${currentReceiptData.propietario}`, 14, 51);
-    doc.text(`Inmueble: ${currentReceiptData.propiedad}`, 14, 57);
-
-    // Tabla con AutoTable
-    doc.autoTable({
-        startY: 65,
-        head: [['Concepto', 'Período', 'Total']],
-        body: [
-            ['Canon Locativo Mensual', currentReceiptData.periodo, AppUtils.formatCurrency(currentReceiptData.montoBase)]
-        ],
-        theme: 'striped',
-        headStyles: { fillColor: [15, 23, 42] }
-    });
-
-    const finalY = doc.lastAutoTable.finalY + 15;
-    doc.setFont('helvetica', 'bold');
-    doc.text(`Total Cancelado: ${AppUtils.formatCurrency(currentReceiptData.montoBase)}`, 14, finalY);
-
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.text(`Retención administrativa (${currentReceiptData.comisionPct}%): ${AppUtils.formatCurrency(currentReceiptData.comision)}`, 14, finalY + 6);
+    doc.text('RECIBO OFICIAL DE COBRANZA', 14, 26);
+    doc.text(`Comprobante: ${d.receiptNumber}`, 14, 32);
+    doc.text(`Fecha de cobro: ${d.date}`, 14, 38);
 
-    // Líneas de firma limpias
-    doc.line(20, finalY + 40, 80, finalY + 40);
-    doc.text('Firma Inquilino', 35, finalY + 45);
+    doc.line(14, 42, 196, 42);
 
-    doc.line(130, finalY + 40, 190, finalY + 40);
-    doc.text('Firma Administración', 145, finalY + 45);
+    doc.text(`Inquilino: ${d.contract.tenant_name || 'N/A'}`, 14, 50);
+    doc.text(`Propietario: ${d.contract.owner_name || 'N/A'}`, 14, 56);
+    doc.text(`Inmueble: ${d.contract.property_address || 'Sin especificar'}`, 14, 62);
 
-    doc.save(`${currentReceiptData.numero}.pdf`);
-    if (window.UI) UI.toast('Recibo PDF descargado', 'success');
-}
+    if (doc.autoTable) {
+        doc.autoTable({
+            startY: 70,
+            head: [['Concepto', 'Importe']],
+            body: [
+                ['Canon locativo mensual', AppUtils.formatCurrency(d.montoTotal)]
+            ],
+            foot: [
+                ['TOTAL ABONADO', AppUtils.formatCurrency(d.montoTotal)]
+            ],
+            theme: 'grid',
+            headStyles: { fillColor: [79, 70, 229] },
+            footStyles: { fillColor: [240, 253, 244], textColor: [22, 101, 52], fontStyle: 'bold' }
+        });
 
-function enviarReciboWhatsApp() {
-    if (!currentReceiptData) return;
+        const finalY = doc.lastAutoTable.finalY || 100;
+        doc.setFontSize(8);
+        doc.setTextColor(100);
+        doc.text(
+            'Documento extendido a título de constancia administrativa en el sistema de Inmobiliaria Mortola Y Asociados.',
+            14,
+            finalY + 15
+        );
+    }
 
-    let phone = currentReceiptData.inquilinoPhone.replace(/\D/g, '');
-    if (phone.length === 10) phone = '549' + phone;
-    else if (phone.startsWith('54') && !phone.startsWith('549')) phone = '549' + phone.substring(2);
-
-    const msg = 
-`Estimado/a *${currentReceiptData.inquilino}*, adjuntamos constancia de pago de alquiler (*${currentReceiptData.numero}*):
-- *Inmueble:* ${currentReceiptData.propiedad}
-- *Período:* ${currentReceiptData.periodo}
-- *Monto Abonado:* ${AppUtils.formatCurrency(currentReceiptData.montoBase)}
-- *Fecha:* ${AppUtils.formatDate(currentReceiptData.fecha)}
-
-Gracias por su cumplimiento. 
-_Mórtola & Asociados - Gestión Inmobiliaria_`;
-
-    const url = phone 
-        ? `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(msg)}`
-        : `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
-
-    window.open(url, '_blank');
+    doc.save(`${d.receiptNumber}.pdf`);
+    UI.toast('PDF generado con éxito', 'success');
 }
 
 function enviarReciboEmail() {
     if (!currentReceiptData) return;
-    const email = currentReceiptData.inquilinoEmail;
-    const subject = encodeURIComponent(`Comprobante de Pago - Alquiler ${currentReceiptData.periodo}`);
-    const body = encodeURIComponent(`Estimado/a ${currentReceiptData.inquilino},\n\nLe enviamos el detalle de su recibo ${currentReceiptData.numero} por el importe de ${AppUtils.formatCurrency(currentReceiptData.montoBase)} correspondiente a ${currentReceiptData.periodo}.\n\nAtentamente,\nMórtola & Asociados`);
-    
-    window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
+    const d = currentReceiptData;
+    const subject = encodeURIComponent(`Recibo de Alquiler - Inmobiliaria Mórtola y Asociados - ${d.receiptNumber}`);
+    const body = encodeURIComponent(
+        `Estimado/a ${d.contract.tenant_name || ''},\n\n` +
+        `Adjuntamos constancia del cobro de alquiler:\n\n` +
+        `Comprobante: ${d.receiptNumber}\n` +
+        `Inmueble: ${d.contract.property_address || ''}\n` +
+        `Monto total abonado: ${AppUtils.formatCurrency(d.montoTotal)}\n` +
+        `Fecha: ${d.date}\n\n` +
+        `Documento extendido a título de constancia administrativa en el sistema de Inmobiliaria Mortola Y Asociados.\n\n` +
+        `Saludos cordiales,\nInmobiliaria Mórtola y Asociados.`
+    );
+    window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
 }
 
-// Exponer funciones globales
+function enviarReciboWhatsApp() {
+    if (!currentReceiptData) {
+        UI.toast('No hay datos del recibo disponibles', 'warning');
+        return;
+    }
+
+    const d = currentReceiptData;
+
+    let phone = d.contract.tenant_phone;
+    if (!phone && currentTenants.length > 0) {
+        const tenant = currentTenants.find(t => t.id === d.contract.tenant_id);
+        if (tenant) phone = tenant.phone;
+    }
+
+    if (!phone || !phone.trim()) {
+        UI.toast('El inquilino no tiene un teléfono registrado.', 'warning');
+        return;
+    }
+
+    let cleanPhone = phone.replace(/\D/g, '');
+    if (cleanPhone.length === 10) cleanPhone = '549' + cleanPhone;
+    else if (cleanPhone.length === 11 && cleanPhone.startsWith('15')) cleanPhone = '549' + cleanPhone.substring(2);
+    else if (cleanPhone.startsWith('54') && !cleanPhone.startsWith('549')) cleanPhone = '549' + cleanPhone.substring(2);
+    else if (!cleanPhone.startsWith('54') && cleanPhone.length <= 11) cleanPhone = '549' + cleanPhone;
+
+    const mensaje = 
+`🧾 *RECIBO DE ALQUILER - INMOBILIARIA MÓRTOLA Y ASOCIADOS*
+----------------------------------------
+*N° Recibo:* ${d.receiptNumber}
+*Fecha:* ${d.date}
+
+👤 *Inquilino:* ${d.contract.tenant_name || 'Inquilino'}
+🏠 *Inmueble:* ${d.contract.property_address || 'Inmueble administrado'}
+💰 *Total Abonado:* ${AppUtils.formatCurrency(d.montoTotal)}
+📋 *Concepto:* Canon locativo mensual
+
+✅ *Estado:* Cobrado y registrado con éxito.
+----------------------------------------
+_Documento extendido a título de constancia administrativa en el sistema de Inmobiliaria Mortola Y Asociados._`;
+
+    const whatsappUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(mensaje)}`;
+    window.open(whatsappUrl, '_blank');
+    UI.toast('Abriendo WhatsApp...', 'success');
+}
+
+// ============================================
+// EXPORTACIÓN A WINDOW
+// ============================================
+
 window.abrirModalNuevoContrato = abrirModalNuevoContrato;
 window.abrirModalEditarContrato = abrirModalEditarContrato;
-window.eliminarContratoGlobal = eliminarContratoGlobal;
 window.calcularAumentoGlobal = calcularAumentoGlobal;
+window.eliminarContratoGlobal = eliminarContratoGlobal;
+window.eliminarArchivoContrato = eliminarArchivoContrato;
+window.aplicarAumento = aplicarAumento;
 window.abrirReciboModal = abrirReciboModal;
 window.cerrarRecibo = cerrarRecibo;
 window.imprimirRecibo = imprimirRecibo;
 window.descargarPDF = descargarPDF;
-window.enviarReciboWhatsApp = enviarReciboWhatsApp;
 window.enviarReciboEmail = enviarReciboEmail;
-window.eliminarArchivoContrato = eliminarArchivoContrato;
+window.enviarReciboWhatsApp = enviarReciboWhatsApp;
 window.irPaginaContracts = irPaginaContracts;
+window.loadContracts = loadContracts;

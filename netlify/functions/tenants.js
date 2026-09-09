@@ -16,19 +16,24 @@ exports.handler = async (event, context) => {
     try {
         const sql = getDb();
 
-        // 1. Auto-migración tabla tenants
+        // 1. Asegurar tabla base de inquilinos
         await sql`
             CREATE TABLE IF NOT EXISTS tenants (
                 id SERIAL PRIMARY KEY,
-                dni VARCHAR(50),
-                name VARCHAR(255) NOT NULL,
-                email VARCHAR(255),
-                phone VARCHAR(50),
-                address VARCHAR(255),
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                name VARCHAR(255) NOT NULL
             );
         `;
+
+        // 2. Auto-migración: Asegurar todas las columnas faltantes
+        await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS dni VARCHAR(50);`;
+        await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS email VARCHAR(255);`;
+        await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS phone VARCHAR(50);`;
+        await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS address VARCHAR(255);`;
+        await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;`;
+        await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;`;
+
+        // Asegurar que exista contracts para el LEFT JOIN de contratos
+        await sql`CREATE TABLE IF NOT EXISTS contracts (id SERIAL PRIMARY KEY, tenant_id INTEGER);`;
 
         // ========================================================
         // GET: Listar inquilinos
@@ -36,11 +41,18 @@ exports.handler = async (event, context) => {
         if (event.httpMethod === 'GET') {
             const tenants = await sql`
                 SELECT 
-                    t.*,
+                    t.id,
+                    t.dni,
+                    t.name,
+                    t.email,
+                    t.phone,
+                    t.address,
+                    t.created_at,
+                    t.updated_at,
                     COUNT(c.id) as total_contracts
                 FROM tenants t
                 LEFT JOIN contracts c ON t.id = c.tenant_id
-                GROUP BY t.id
+                GROUP BY t.id, t.dni, t.name, t.email, t.phone, t.address, t.created_at, t.updated_at
                 ORDER BY t.name ASC;
             `;
 
@@ -66,14 +78,21 @@ exports.handler = async (event, context) => {
                 };
             }
 
+            const cleanDni = dni && String(dni).trim() !== '' ? String(dni).trim() : null;
+            const cleanEmail = email && String(email).trim() !== '' ? String(email).trim() : null;
+            const cleanPhone = phone && String(phone).trim() !== '' ? String(phone).trim() : null;
+            const cleanAddress = address && String(address).trim() !== '' ? String(address).trim() : null;
+
             const nuevo = await sql`
-                INSERT INTO tenants (dni, name, email, phone, address, updated_at)
-                VALUES (
-                    ${dni ? dni.trim() : null},
+                INSERT INTO tenants (
+                    dni, name, email, phone, address, created_at, updated_at
+                ) VALUES (
+                    ${cleanDni},
                     ${name.trim()},
-                    ${email ? email.trim() : null},
-                    ${phone ? phone.trim() : null},
-                    ${address ? address.trim() : null},
+                    ${cleanEmail},
+                    ${cleanPhone},
+                    ${cleanAddress},
+                    NOW(),
                     NOW()
                 )
                 RETURNING *;
@@ -93,7 +112,7 @@ exports.handler = async (event, context) => {
             const body = JSON.parse(event.body || '{}');
             const { id, dni, name, email, phone, address } = body;
 
-            if (!id || !name) {
+            if (!id || !name || !name.trim()) {
                 return {
                     statusCode: 400,
                     headers,
@@ -101,16 +120,21 @@ exports.handler = async (event, context) => {
                 };
             }
 
+            const cleanDni = dni && String(dni).trim() !== '' ? String(dni).trim() : null;
+            const cleanEmail = email && String(email).trim() !== '' ? String(email).trim() : null;
+            const cleanPhone = phone && String(phone).trim() !== '' ? String(phone).trim() : null;
+            const cleanAddress = address && String(address).trim() !== '' ? String(address).trim() : null;
+
             const actualizado = await sql`
                 UPDATE tenants
                 SET 
-                    dni = ${dni ? dni.trim() : null},
+                    dni = ${cleanDni},
                     name = ${name.trim()},
-                    email = ${email ? email.trim() : null},
-                    phone = ${phone ? phone.trim() : null},
-                    address = ${address ? address.trim() : null},
+                    email = ${cleanEmail},
+                    phone = ${cleanPhone},
+                    address = ${cleanAddress},
                     updated_at = NOW()
-                WHERE id = ${id}
+                WHERE id = ${parseInt(id, 10)}
                 RETURNING *;
             `;
 
@@ -142,23 +166,29 @@ exports.handler = async (event, context) => {
                 };
             }
 
-            // Validar si tiene contratos vinculados
-            const contratos = await sql`
-                SELECT COUNT(*) as count FROM contracts WHERE tenant_id = ${id};
-            `;
-            const count = parseInt(contratos[0].count, 10);
+            const tenantId = parseInt(id, 10);
 
-            if (count > 0) {
-                return {
-                    statusCode: 400,
-                    headers,
-                    body: JSON.stringify({ 
-                        error: `No puedes eliminar este inquilino porque tiene ${count} contrato(s) asociado(s). Elimina o reasigna sus contratos primero.` 
-                    })
-                };
+            // Validar si tiene contratos vinculados
+            try {
+                const contratos = await sql`
+                    SELECT COUNT(*) as count FROM contracts WHERE tenant_id = ${tenantId};
+                `;
+                const count = parseInt(contratos[0].count, 10);
+
+                if (count > 0) {
+                    return {
+                        statusCode: 400,
+                        headers,
+                        body: JSON.stringify({ 
+                            error: `No puedes eliminar este inquilino porque tiene ${count} contrato(s) asociado(s). Elimina o reasigna sus contratos primero.` 
+                        })
+                    };
+                }
+            } catch (checkErr) {
+                console.warn('Advertencia verificando contratos:', checkErr.message);
             }
 
-            await sql`DELETE FROM tenants WHERE id = ${id};`;
+            await sql`DELETE FROM tenants WHERE id = ${tenantId};`;
 
             return {
                 statusCode: 200,
