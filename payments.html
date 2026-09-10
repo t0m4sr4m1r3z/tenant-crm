@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>Pagos - Tenant CRM</title>
+    <title>Pagos y Cobranzas - Tenant CRM</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,6 +11,11 @@
     <script src="/js/tailwind-config.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/css/style.css">
+    
+    <!-- Librerías para Generación de PDF (Recibos Oficiales) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
     <!-- PWA Meta Tags -->
     <link rel="icon" type="image/png" href="/icons/icon-192x192.png">
     <link rel="manifest" href="/site.webmanifest">
@@ -109,9 +114,9 @@
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
             <div>
                 <h2 class="text-2xl font-bold text-gray-800">💰 Cobranzas y Pagos</h2>
-                <p class="text-gray-500 text-sm mt-1">Gestiona los pagos de alquiler y controla la morosidad</p>
+                <p class="text-gray-500 text-sm mt-1">Gestiona los pagos de alquiler y emite los recibos oficiales</p>
             </div>
-            <button id="registerPaymentBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 transition" data-action="create">
+            <button id="registerPaymentBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 transition shadow-sm" data-action="create">
                 <i class="fas fa-plus" aria-hidden="true"></i>
                 <span>Registrar Pago</span>
             </button>
@@ -251,11 +256,11 @@
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Concepto</label>
                         <select id="paymentConcept" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                            <option value="1">Alquiler</option>
-                            <option value="2">Expensas</option>
-                            <option value="3">Depósito</option>
-                            <option value="4">Actualización</option>
-                            <option value="5">Multa</option>
+                            <option value="Alquiler">Alquiler</option>
+                            <option value="Expensas">Expensas</option>
+                            <option value="Depósito">Depósito</option>
+                            <option value="Actualización">Actualización</option>
+                            <option value="Multa / Punitorio">Multa / Punitorio</option>
                         </select>
                     </div>
                     
@@ -266,7 +271,7 @@
                             <div class="field-error text-red-500 text-sm mt-1 hidden"></div>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Comisión</label>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Comisión Retenida</label>
                             <input type="number" id="paymentCommission" value="0" min="0" step="0.01" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                         </div>
                     </div>
@@ -278,7 +283,7 @@
                             <div class="field-error text-red-500 text-sm mt-1 hidden"></div>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Fecha Pago</label>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Fecha de Pago</label>
                             <input type="date" id="paymentDate" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                         </div>
                     </div>
@@ -286,26 +291,26 @@
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Método de Pago</label>
                         <select id="paymentMethod" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                            <option value="efectivo">Efectivo</option>
-                            <option value="transferencia">Transferencia</option>
-                            <option value="cheque">Cheque</option>
-                            <option value="tarjeta">Tarjeta</option>
+                            <option value="Transferencia">Transferencia Bancaria</option>
+                            <option value="Efectivo">Efectivo</option>
+                            <option value="Cheque">Cheque</option>
+                            <option value="Tarjeta">Tarjeta</option>
                         </select>
                     </div>
                     
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Número de Referencia</label>
-                        <input type="text" id="paymentReference" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="N° de transferencia/cheque">
+                        <input type="text" id="paymentReference" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="N° de transferencia o comprobante">
                     </div>
                     
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Notas</label>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Notas / Observaciones</label>
                         <textarea id="paymentNotes" rows="2" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"></textarea>
                     </div>
                     
                     <div class="flex gap-3 pt-4">
                         <button type="button" id="cancelModalBtn" class="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition">Cancelar</button>
-                        <button type="submit" class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">Guardar Pago</button>
+                        <button type="submit" id="submitPaymentBtn" class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">Guardar y Emitir Recibo</button>
                     </div>
                 </form>
             </div>
@@ -322,6 +327,49 @@
                 <div class="flex gap-3">
                     <button id="cancelPayBtn" class="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition">Cancelar</button>
                     <button id="confirmPayBtn" class="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">Confirmar Pago</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Recibo Oficial -->
+    <div id="receiptModal" class="fixed inset-0 z-40 hidden overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="receiptModalTitle">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="fixed inset-0 bg-gray-600 bg-opacity-75" onclick="cerrarRecibo()"></div>
+            
+            <div class="relative bg-white dark:bg-slate-900 rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                <div class="sticky top-0 bg-white dark:bg-slate-900 px-6 py-4 border-b dark:border-slate-800 flex justify-between items-center z-10">
+                    <h3 id="receiptModalTitle" class="text-lg font-semibold dark:text-white">🧾 Recibo Oficial de Alquiler</h3>
+                    <button onclick="cerrarRecibo()" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" aria-label="Cerrar recibo">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                
+                <div class="p-6" id="receiptContent">
+                    <!-- Contenido renderizado con JS -->
+                </div>
+                
+                <div class="sticky bottom-0 bg-white dark:bg-slate-900 px-6 py-4 border-t dark:border-slate-800 flex flex-wrap justify-end gap-2 z-10">
+                    <button onclick="imprimirRecibo()" 
+                            class="px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 transition flex items-center gap-2">
+                        <i class="fas fa-print"></i>
+                        <span>Imprimir</span>
+                    </button>
+                    <button onclick="descargarPDF()" 
+                            class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition flex items-center gap-2">
+                        <i class="fas fa-file-pdf"></i>
+                        <span>Descargar PDF</span>
+                    </button>
+                    <button onclick="enviarReciboEmail()" 
+                            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2">
+                        <i class="fas fa-envelope"></i>
+                        <span>Enviar por Email</span>
+                    </button>
+                    <button onclick="enviarReciboWhatsApp()" 
+                            class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition flex items-center gap-2 font-medium shadow-sm">
+                        <i class="fab fa-whatsapp text-lg"></i>
+                        <span>Enviar por WhatsApp</span>
+                    </button>
                 </div>
             </div>
         </div>
